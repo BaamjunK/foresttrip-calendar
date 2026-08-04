@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>휴양림 빈자리 달력</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --surface-2: #eeeeea;
+    --border: #dddad2;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #8a887f;
+    --accent: #008300;          /* 예약 가능 = good */
+    --accent-ink: #006400;
+    --tint-1: rgba(0,131,0,.10);  /* 1~2곳 */
+    --tint-2: rgba(0,131,0,.20);  /* 3~9곳 */
+    --tint-3: rgba(0,131,0,.32);  /* 10곳+ */
+    --sun: #c03434;
+    --sat: #2a78d6;
+    --warn-bg: #fdf3e0;
+    --warn-ink: #8a5a00;
+    --shadow: 0 8px 28px rgba(0,0,0,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0: #121211;
+      --surface-1: #1a1a19;
+      --surface-2: #242422;
+      --border: #3a3a36;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #83817a;
+      --accent: #35a835;
+      --accent-ink: #6fce6f;
+      --tint-1: rgba(53,168,53,.14);
+      --tint-2: rgba(53,168,53,.26);
+      --tint-3: rgba(53,168,53,.40);
+      --sun: #e66767;
+      --sat: #3987e5;
+      --warn-bg: #35290f;
+      --warn-ink: #e5b96a;
+      --shadow: 0 8px 28px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --border: #3a3a36;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #83817a;
+    --accent: #35a835;
+    --accent-ink: #6fce6f;
+    --tint-1: rgba(53,168,53,.14);
+    --tint-2: rgba(53,168,53,.26);
+    --tint-3: rgba(53,168,53,.40);
+    --sun: #e66767;
+    --sat: #3987e5;
+    --warn-bg: #35290f;
+    --warn-ink: #e5b96a;
+    --shadow: 0 8px 28px rgba(0,0,0,.5);
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-family: "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+    line-height: 1.5;
+    padding: 20px 14px 60px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+
+  header h1 { font-size: 1.35rem; font-weight: 700; }
+  header .sub { color: var(--text-secondary); font-size: .85rem; margin-top: 2px; }
+
+  .banner {
+    margin-top: 12px; padding: 8px 12px; border-radius: 8px;
+    background: var(--warn-bg); color: var(--warn-ink); font-size: .85rem;
+  }
+
+  .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+  .tile {
+    flex: 1 1 120px; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px;
+  }
+  .tile .k { font-size: .75rem; color: var(--text-secondary); }
+  .tile .v { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: .8rem; font-weight: 400; color: var(--text-muted); }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .controls input, .controls select {
+    padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); font-size: .9rem;
+  }
+  .controls input { flex: 1 1 180px; }
+  .controls select { flex: 0 0 auto; cursor: pointer; }
+  .controls input:focus, .controls select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary);
+    font-size: .9rem; cursor: pointer;
+  }
+  .tabs button.on {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 700;
+  }
+
+  .cal { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .dow, .week { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .dow div {
+    padding: 8px 0; text-align: center; font-size: .78rem;
+    color: var(--text-secondary); background: var(--surface-2);
+  }
+  .dow div:first-child { color: var(--sun); }
+  .dow div:last-child { color: var(--sat); }
+  .day {
+    min-height: 86px; padding: 6px; border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border); position: relative;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .week .day:first-child { border-left: none; }
+  .day.blank { background: var(--surface-2); opacity: .45; }
+  .day.past .num, .day.past .mini { opacity: .38; }
+  .day .num { font-size: .8rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .day.sun .num { color: var(--sun); }
+  .day.sat .num { color: var(--sat); }
+  .day.today .num::after {
+    content: "오늘"; margin-left: 4px; font-size: .62rem; font-weight: 700;
+    color: var(--accent-ink);
+  }
+  .day.has { cursor: pointer; }
+  .day.t1 { background: var(--tint-1); }
+  .day.t2 { background: var(--tint-2); }
+  .day.t3 { background: var(--tint-3); }
+  .day.has:hover { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+  .badge {
+    align-self: flex-start; font-size: .72rem; font-weight: 700;
+    color: #fff; background: var(--accent); border-radius: 999px; padding: 1px 8px;
+  }
+  .mini { font-size: .68rem; color: var(--text-secondary); overflow: hidden; }
+  .mini div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini .more { color: var(--text-muted); }
+
+  dialog {
+    border: 1px solid var(--border); border-radius: 14px; padding: 0;
+    background: var(--surface-1); color: var(--text-primary);
+    width: min(560px, calc(100vw - 32px)); max-height: 80vh; box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--surface-1);
+  }
+  .dlg-head h2 { font-size: 1rem; }
+  .dlg-head button {
+    border: none; background: none; font-size: 1.2rem; cursor: pointer;
+    color: var(--text-secondary); padding: 4px 8px;
+  }
+  .dlg-body { padding: 10px 18px 18px; overflow-y: auto; }
+  .forest { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .forest:last-child { border-bottom: none; }
+  .forest h3 { font-size: .92rem; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+  .forest h3 .region { font-size: .75rem; font-weight: 400; color: var(--text-muted); }
+  .forest h3 .maps { margin-left: auto; display: flex; gap: 6px; }
+  .maps a {
+    font-size: .7rem; font-weight: 400; text-decoration: none;
+    color: var(--text-secondary); border: 1px solid var(--border);
+    border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+  }
+  .maps a:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .room { display: flex; justify-content: space-between; gap: 10px; font-size: .82rem; padding: 3px 0; }
+  .room .rn { color: var(--text-secondary); }
+  .room .rm { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .room .rp { color: var(--text-primary); font-weight: 600; }
+  .room .rp.unknown { color: var(--text-muted); font-weight: 400; }
+  .forest .rule { font-size: .74rem; color: var(--warn-ink); margin: 2px 0 4px; }
+
+  .day .open {
+    font-size: .64rem; font-weight: 600; color: var(--warn-ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .open-section {
+    background: var(--warn-bg); border-radius: 10px;
+    padding: 10px 14px; margin: 12px 0 4px;
+  }
+  .open-section h4 { font-size: .82rem; color: var(--warn-ink); margin-bottom: 4px; }
+  .open-row {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: .78rem; color: var(--text-secondary); padding: 2px 0;
+  }
+  .open-row span:last-child { color: var(--text-muted); white-space: nowrap; }
+
+  footer { margin-top: 18px; font-size: .75rem; color: var(--text-muted); }
+  footer a { color: inherit; }
+  .empty-note { padding: 30px; text-align: center; color: var(--text-muted); font-size: .9rem; }
+
+  @media (max-width: 560px) {
+    .day { min-height: 64px; }
+    .mini { display: none; }
+    .badge { font-size: .66rem; padding: 1px 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🌲 휴양림 빈자리 달력</h1>
+    <div class="sub" id="meta">데이터 불러오는 중…</div>
+  </header>
+
+  <div id="banners"></div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="controls">
+    <div class="tabs" id="tabs"></div>
+    <select id="region" aria-label="지역 필터">
+      <option value="">전체 지역</option>
+    </select>
+    <select id="price" aria-label="가격 필터">
+      <option value="0">전체 가격</option>
+      <option value="50000">5만원 이하</option>
+      <option value="100000">10만원 이하</option>
+      <option value="150000">15만원 이하</option>
+      <option value="200000">20만원 이하</option>
+    </select>
+    <input id="filter" type="search" placeholder="휴양림명 필터" autocomplete="off">
+  </div>
+
+  <div class="cal">
+    <div class="dow"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
+    <div id="grid"></div>
+  </div>
+
+  <footer>
+    출처: <a href="https://www.foresttrip.go.kr" target="_blank" rel="noopener">숲나들e</a>
+    · 숙박 시설 기준 · 매일 아침 자동 갱신 · 가격은 1박 기준(성수기·주말 반영, 기준인원 초과 요금 별도)이며
+    "가격 미확인" 객실은 다음 갱신에서 순차 채워집니다 · 실제 예약 가능 여부는 숲나들e에서 최종 확인하세요.
+  </footer>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-head">
+    <h2 id="dlg-title"></h2>
+    <button id="dlg-close" aria-label="닫기">✕</button>
+  </div>
+  <div class="dlg-body" id="dlg-body"></div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  var DATA = null;
+  var months = [];       // ["202608","202609"]
+  var current = 0;       // months 인덱스
+  var filterText = "";
+  var regionFilter = "";
+  var maxPrice = 0;      // 0 = 전체 가격
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+  var norm = function (s) { return String(s).replace(/\s+/g, ""); };
+
+  function todayKey() {
+    var now = new Date();
+    return "" + now.getFullYear() +
+      String(now.getMonth() + 1).padStart(2, "0") +
+      String(now.getDate()).padStart(2, "0");
+  }
+
+  // 필터(지역 + 가격 + 휴양림명) 적용된 해당 날짜의 지점 목록.
+  // 가격 필터가 켜지면 예산 안의 객실만 남기고, 남는 객실이 없는 지점은 제외한다.
+  // (가격 미확인 객실은 예산 판정이 불가능하므로 가격 필터에서는 제외된다)
+  function entriesFor(dateKey) {
+    var list = (DATA.days && DATA.days[dateKey]) || [];
+    var needle = filterText ? norm(filterText) : null;
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      if (regionFilter && e.region !== regionFilter) continue;
+      if (needle && norm(e.forest).indexOf(needle) === -1) continue;
+      if (maxPrice > 0) {
+        var rooms = e.rooms.filter(function (r) {
+          return r.price != null && r.price <= maxPrice;
+        });
+        if (!rooms.length) continue;
+        out.push({ forest: e.forest, region: e.region, rooms: rooms });
+      } else {
+        out.push(e);
+      }
+    }
+    return out;
+  }
+
+  // 정책(policy.name)은 공백 제거형이라 지점명을 같은 형태로 정규화해 매칭
+  function policyKey(forestName) {
+    return norm(forestName.replace(/^\[[^\]]*\]/, "").replace(/^\([^)]*\)/, ""));
+  }
+
+  var policyByName = {};  // 정규화 지점명 -> {rule, open_day, ...}
+  var openByDay = {};     // 매월 고정 오픈일(1~31) -> [policy, ...]
+  function buildPolicyIndex() {
+    (DATA.policies || []).forEach(function (p) {
+      policyByName[p.name] = p;
+      if (p.open_day) (openByDay[p.open_day] = openByDay[p.open_day] || []).push(p);
+    });
+  }
+
+  // 해당 날짜에 예약이 오픈되는 휴양림 목록 (휴양림명 필터만 적용)
+  function opensFor(dayOfMonth) {
+    var list = openByDay[dayOfMonth] || [];
+    if (!filterText) return list;
+    var needle = norm(filterText);
+    return list.filter(function (p) { return p.name.indexOf(needle) !== -1; });
+  }
+
+  function populateRegions() {
+    var seen = {};
+    Object.keys(DATA.days || {}).forEach(function (k) {
+      DATA.days[k].forEach(function (e) { if (e.region) seen[e.region] = 1; });
+    });
+    var opts = Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, "ko"); });
+    $("region").innerHTML = '<option value="">전체 지역</option>' +
+      opts.map(function (r) { return "<option>" + esc(r) + "</option>"; }).join("");
+  }
+
+  function monthLabel(ym) {
+    return parseInt(ym.slice(0, 4), 10) + "년 " + parseInt(ym.slice(4), 10) + "월";
+  }
+
+  function renderTabs() {
+    $("tabs").innerHTML = months.map(function (ym, i) {
+      return '<button data-i="' + i + '" class="' + (i === current ? "on" : "") + '">' +
+        monthLabel(ym) + "</button>";
+    }).join("");
+  }
+
+  function renderTiles() {
+    var from = DATA.range.from || "", to = DATA.range.to || "";
+    var dayKeys = Object.keys(DATA.days || {});
+    var availDays = 0, forestSet = {};
+    dayKeys.forEach(function (k) {
+      var es = entriesFor(k);
+      if (es.length) {
+        availDays++;
+        es.forEach(function (e) { forestSet[e.forest] = 1; });
+      }
+    });
+    var html =
+      tile("조회 지점", DATA.forests_scanned, "곳") +
+      tile("빈자리 있는 날", availDays, "일") +
+      tile("빈자리 지점", Object.keys(forestSet).length, "곳");
+    if (DATA.fetch_failures > 0) {
+      html += tile("조회 실패", DATA.fetch_failures, "건");
+    }
+    $("tiles").innerHTML = html;
+
+    var gen = DATA.generated_at ? DATA.generated_at.replace("T", " ").slice(0, 16) : "?";
+    $("meta").textContent = fmtDate(from) + " ~ " + fmtDate(to) +
+      " · 마지막 갱신 " + gen;
+
+    var banners = "";
+    if (DATA.sample) {
+      banners += '<div class="banner">⚠ 샘플 데이터입니다. 첫 배치 실행(deploy.sh) 후 실제 데이터로 바뀝니다.</div>';
+    }
+    if (DATA.fetch_failures > 0) {
+      banners += '<div class="banner">⚠ 일부 지점(' + DATA.fetch_failures +
+        '건) 조회에 실패했습니다. 표시되지 않은 빈자리가 있을 수 있습니다.</div>';
+    }
+    $("banners").innerHTML = banners;
+  }
+
+  function tile(k, v, unit) {
+    return '<div class="tile"><div class="k">' + k + '</div><div class="v">' +
+      (v == null ? "?" : v) + " <small>" + unit + "</small></div></div>";
+  }
+
+  function fmtDate(yyyymmdd) {
+    if (!yyyymmdd || yyyymmdd.length !== 8) return "?";
+    return parseInt(yyyymmdd.slice(4, 6), 10) + "/" + parseInt(yyyymmdd.slice(6), 10);
+  }
+
+  function renderGrid() {
+    var ym = months[current];
+    var year = parseInt(ym.slice(0, 4), 10), month = parseInt(ym.slice(4), 10);
+    var first = new Date(year, month - 1, 1);
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var startDow = first.getDay();
+    var tk = todayKey();
+    var from = DATA.range.from || "00000000", to = DATA.range.to || "99999999";
+
+    var cells = [];
+    for (var b = 0; b < startDow; b++) cells.push('<div class="day blank"></div>');
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      var key = ym + String(d).padStart(2, "0");
+      var dow = (startDow + d - 1) % 7;
+      var cls = ["day"];
+      if (dow === 0) cls.push("sun");
+      if (dow === 6) cls.push("sat");
+      if (key === tk) cls.push("today");
+
+      var inRange = key >= from && key <= to;
+      if (!inRange) cls.push("past");
+
+      var inner = '<div class="num">' + d + "</div>";
+      if (inRange) {
+        var es = entriesFor(key);
+        var opens = opensFor(d);
+        if (es.length) {
+          cls.push("has");
+          cls.push(es.length >= 10 ? "t3" : es.length >= 3 ? "t2" : "t1");
+          inner += '<div class="badge">' + es.length + "곳</div>";
+          var names = es.slice(0, 2).map(function (e) {
+            return "<div>" + esc(shortName(e.forest)) + "</div>";
+          }).join("");
+          var more = es.length > 2 ? '<div class="more">+' + (es.length - 2) + "곳</div>" : "";
+          inner += '<div class="mini">' + names + more + "</div>";
+        }
+        if (opens.length) {
+          if (!es.length) cls.push("has");
+          inner += '<div class="open">🔔 오픈 ' + opens.length + "곳</div>";
+        }
+      }
+      cells.push('<div class="' + cls.join(" ") + '" data-key="' + key + '">' + inner + "</div>");
+    }
+    while (cells.length % 7 !== 0) cells.push('<div class="day blank"></div>');
+
+    var weeks = [];
+    for (var i = 0; i < cells.length; i += 7) {
+      weeks.push('<div class="week">' + cells.slice(i, i + 7).join("") + "</div>");
+    }
+    $("grid").innerHTML = weeks.join("");
+  }
+
+  // "[공립](가평군)강씨봉자연휴양림" → "강씨봉" (달력 셀 미리보기용 축약)
+  function shortName(name) {
+    return name
+      .replace(/^\[[^\]]*\]/, "")
+      .replace(/^\([^)]*\)/, "")
+      .replace(/^국립\s*/, "")
+      .replace(/자연휴양림$/, "");
+  }
+
+  function openDetail(key) {
+    var es = entriesFor(key);
+    var y = key.slice(0, 4), m = parseInt(key.slice(4, 6), 10), d = parseInt(key.slice(6), 10);
+    var opens = opensFor(d);
+    if (!es.length && !opens.length) return;
+    var dow = "일월화수목금토"[new Date(+y, m - 1, d).getDay()];
+    $("dlg-title").textContent = y + "년 " + m + "월 " + d + "일 (" + dow + ") · 빈자리 " + es.length + "곳";
+
+    var openHtml = "";
+    if (opens.length) {
+      openHtml = '<div class="open-section"><h4>🔔 이날 예약 오픈 (' + opens.length + "곳)</h4>" +
+        opens.map(function (p) {
+          return '<div class="open-row"><span>' + esc(p.name) + "</span><span>" + esc(p.rule) + "</span></div>";
+        }).join("") + "</div>";
+    }
+
+    $("dlg-body").innerHTML = openHtml + es.map(function (e) {
+      var rooms = e.rooms.map(function (r) {
+        var meta = [];
+        if (r.category) meta.push(r.category);
+        if (r.capacity != null) meta.push("최대 " + r.capacity + "인");
+        if (r.area != null) {
+          var a = String(r.area);
+          meta.push(/㎡|m2/.test(a) ? a : a + "㎡");
+        }
+        var price = r.price != null
+          ? '<strong class="rp">' + r.price.toLocaleString("ko-KR") + "원</strong>"
+          : '<span class="rp unknown">가격 미확인</span>';
+        return '<div class="room"><span class="rn">' + esc(r.name) +
+          '</span><span class="rm">' + esc(meta.join(" · ")) +
+          (meta.length ? " · " : "") + price + "</span></div>";
+      }).join("");
+      var q = encodeURIComponent(e.forest);
+      var maps = '<span class="maps">' +
+        '<a href="https://map.kakao.com/link/search/' + q + '" target="_blank" rel="noopener">카카오맵</a>' +
+        '<a href="https://map.naver.com/p/search/' + q + '" target="_blank" rel="noopener">네이버지도</a>' +
+        "</span>";
+      var policy = policyByName[policyKey(e.forest)];
+      var ruleLine = policy && policy.rule
+        ? '<div class="rule">예약 오픈: ' + esc(policy.rule) + "</div>"
+        : "";
+      return '<div class="forest"><h3>' + esc(e.forest) +
+        '<span class="region">' + esc(e.region || "") + "</span>" + maps + "</h3>" +
+        ruleLine + rooms + "</div>";
+    }).join("");
+    $("dlg").showModal();
+  }
+
+  function rerender() {
+    renderTiles();
+    renderTabs();
+    renderGrid();
+  }
+
+  // ── 이벤트 ──────────────────────────────────────────────
+  $("tabs").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b) return;
+    current = parseInt(b.dataset.i, 10);
+    renderTabs();
+    renderGrid();
+  });
+  $("filter").addEventListener("input", function () {
+    filterText = this.value.trim();
+    rerender();
+  });
+  $("region").addEventListener("change", function () {
+    regionFilter = this.value;
+    rerender();
+  });
+  $("price").addEventListener("change", function () {
+    maxPrice = parseInt(this.value, 10) || 0;
+    rerender();
+  });
+  $("grid").addEventListener("click", function (ev) {
+    var cell = ev.target.closest(".day.has");
+    if (cell) openDetail(cell.dataset.key);
+  });
+  $("dlg-close").addEventListener("click", function () { $("dlg").close(); });
+  $("dlg").addEventListener("click", function (ev) {
+    if (ev.target === this) this.close();
+  });
+
+  // ── 데이터 로드 ─────────────────────────────────────────
+  fetch("data/vacancy.json?v=" + Date.now())
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (json) {
+      DATA = json;
+      var from = DATA.range.from, to = DATA.range.to;
+      var seen = {};
+      months = [];
+      if (from && to) {
+        var y = parseInt(from.slice(0, 4), 10), m = parseInt(from.slice(4, 6), 10);
+        var endYm = to.slice(0, 6);
+        for (var guard = 0; guard < 12; guard++) {
+          var ym = "" + y + String(m).padStart(2, "0");
+          if (!seen[ym]) { seen[ym] = 1; months.push(ym); }
+          if (ym === endYm) break;
+          m++; if (m > 12) { m = 1; y++; }
+        }
+      }
+      if (!months.length) months = [todayKey().slice(0, 6)];
+      var curYm = todayKey().slice(0, 6);
+      current = Math.max(0, months.indexOf(curYm));
+      buildPolicyIndex();
+      populateRegions();
+      rerender();
+    })
+    .catch(function (err) {
+      $("meta").textContent = "데이터를 불러오지 못했습니다: " + err.message;
+      $("grid").innerHTML = '<div class="empty-note">docs/data/vacancy.json 이 아직 없습니다. deploy.sh 를 먼저 실행하세요.</div>';
+    });
+})();
+</script>
+</body>
+</html>
