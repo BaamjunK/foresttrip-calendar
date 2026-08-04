@@ -20,7 +20,7 @@ batch/fetch_prices.py      객실별 1박 요금 조회 (조합별 1회 호출 +
 batch/fetch_policy.py      예약 오픈 정책 페이지 파싱 (공개 페이지)
 batch/transform.py         raw JSON + 정책 → docs/data/vacancy.json 변환
 docs/index.html            달력 페이지 (GitHub Pages, 정적/의존성 없음)
-docs/data/vacancy.json     달력이 읽는 데이터 (배치가 갱신)
+docs/data/vacancy.json     달력이 읽는 데이터 (배치가 갱신, schema v2 · 약 700KB)
 launchd/…plist             매일 08:00 자동 실행 등록용
 data/                      raw.json, price_cache.json, launchd.log (git 제외)
 ```
@@ -46,6 +46,12 @@ data/                      raw.json, price_cache.json, launchd.log (git 제외)
   걸려 있으면 숲나들e 가 대기 화면을 띄운다). 비로그인 시 로그인 후 이어진다.
 - **범위 한계**: 월별예약조회 지점 목록에는 공립·사립만 있다(국립 자연휴양림은
   별도 예약 체계 — 선착순 6주 전 수요일/추첨제 — 라 이 달력에 안 나온다).
+- **데이터 구조(schema v2)**: 매일 커밋되는 파일이라 중복을 걷어낸 인덱스 참조형이다.
+  지점·객실·유형을 마스터 배열로 빼고 날짜별로는 `[[지점idx, [[객실idx, 요금], …]], …]`
+  만 남긴다. 같은 객실 정의가 58일 내내 되풀이되던 구조(5.3MB)를 700KB(gzip 98KB)로
+  줄였다. 요금 0 은 "가격 미확인", 정원·면적 0 은 값 없음을 뜻한다. 페이지는 `v` 를
+  확인하고 다르면 로드를 거부하니, 스키마를 바꿀 때는 `transform.py` 와
+  `docs/index.html` 을 같은 커밋으로 배포해야 한다.
 
 ## 최초 설정
 

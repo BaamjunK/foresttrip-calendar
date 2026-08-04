@@ -268,6 +268,12 @@
 (function () {
   "use strict";
   var DATA = null;
+  // vacancy.json 은 중복을 걷어낸 인덱스 참조형(schema v2)이다. 마스터 배열을
+  // 그대로 들고, 날짜별 데이터는 필요한 순간에만 풀어 쓴다(5만 건을 미리
+  // 객체로 펼치면 메모리만 낭비된다).
+  var FORESTS = [];      // [이름, 지점ID, 지역]
+  var ROOMS = [];        // [이름, 유형idx, 정원, 면적]
+  var CATEGORIES = [];
   var months = [];       // ["202608","202609"]
   var current = 0;       // months 인덱스
   var filterText = "";
@@ -290,27 +296,41 @@
   }
 
   // 필터(지역 + 가격 + 휴양림명) 적용된 해당 날짜의 지점 목록.
-  // 가격 필터가 켜지면 예산 안의 객실만 남기고, 남는 객실이 없는 지점은 제외한다.
-  // (가격 미확인 객실은 예산 판정이 불가능하므로 가격 필터에서는 제외된다)
+  // 반환 원소는 {name, id, region, slots} — slots 는 [객실idx, 요금] 쌍 그대로다.
+  // 객실 상세는 팝업을 열 때만 풀어내므로 달력 렌더링은 마스터 조회 몇 번으로 끝난다.
+  // 가격 필터는 예산 안의 객실만 남기고, 남는 객실이 없는 지점은 제외한다
+  // (요금 0 = 미확인은 예산 판정이 불가능하므로 함께 제외된다).
   function entriesFor(dateKey) {
     var list = (DATA.days && DATA.days[dateKey]) || [];
     var needle = filterText ? norm(filterText) : null;
     var out = [];
     for (var i = 0; i < list.length; i++) {
-      var e = list[i];
-      if (regionFilter && e.region !== regionFilter) continue;
-      if (needle && norm(e.forest).indexOf(needle) === -1) continue;
+      var f = FORESTS[list[i][0]];
+      if (!f) continue;
+      if (regionFilter && f[2] !== regionFilter) continue;
+      if (needle && norm(f[0]).indexOf(needle) === -1) continue;
+      var slots = list[i][1];
       if (maxPrice > 0) {
-        var rooms = e.rooms.filter(function (r) {
-          return r.price != null && r.price <= maxPrice;
-        });
-        if (!rooms.length) continue;
-        out.push({ forest: e.forest, region: e.region, rooms: rooms });
-      } else {
-        out.push(e);
+        slots = slots.filter(function (s) { return s[1] > 0 && s[1] <= maxPrice; });
+        if (!slots.length) continue;
       }
+      out.push({ name: f[0], id: f[1], region: f[2], slots: slots });
     }
     return out;
+  }
+
+  // 팝업에 뿌릴 객실 목록으로 풀어낸다 (요금 0 = 미확인 → null)
+  function hydrateRooms(slots) {
+    return slots.map(function (s) {
+      var r = ROOMS[s[0]] || ["", 0, 0, 0];
+      return {
+        name: r[0],
+        category: CATEGORIES[r[1]] || "",
+        capacity: r[2] || null,
+        area: r[3] || null,
+        price: s[1] > 0 ? s[1] : null
+      };
+    });
   }
 
   // 정책 표와 조회 데이터의 지점명 표기가 다르다:
@@ -366,10 +386,9 @@
   }
 
   function populateRegions() {
+    // 지점 마스터에는 빈자리가 있는 지점만 담겨 있어 그대로 지역 목록이 된다
     var seen = {};
-    Object.keys(DATA.days || {}).forEach(function (k) {
-      DATA.days[k].forEach(function (e) { if (e.region) seen[e.region] = 1; });
-    });
+    FORESTS.forEach(function (f) { if (f[2]) seen[f[2]] = 1; });
     var opts = Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, "ko"); });
     $("region").innerHTML = '<option value="">전체 지역</option>' +
       opts.map(function (r) { return "<option>" + esc(r) + "</option>"; }).join("");
@@ -394,7 +413,7 @@
       var es = entriesFor(k);
       if (es.length) {
         availDays++;
-        es.forEach(function (e) { forestSet[e.forest] = 1; });
+        es.forEach(function (e) { forestSet[e.name] = 1; });
       }
     });
     var html =
@@ -463,7 +482,7 @@
           cls.push(es.length >= 100 ? "t3" : es.length >= 40 ? "t2" : "t1");
           inner += '<div class="badge">' + es.length + "곳</div>";
           var names = es.slice(0, 2).map(function (e) {
-            return "<div>" + esc(shortName(e.forest)) + "</div>";
+            return "<div>" + esc(shortName(e.name)) + "</div>";
           }).join("");
           var more = es.length > 2 ? '<div class="more">+' + (es.length - 2) + "곳</div>" : "";
           inner += '<div class="mini">' + names + more + "</div>";
@@ -522,14 +541,14 @@
   }
 
   function reserveUrl(entry, dateKey) {
-    if (!entry.forest_id) {  // 지점 ID 없는 구버전 데이터는 통합검색으로 폴백
+    if (!entry.id) {  // 지점 ID 를 모르면 통합검색으로 폴백
       return "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do?srchWord=" +
-        encodeURIComponent(bareName(entry.forest));
+        encodeURIComponent(bareName(entry.name));
     }
     var out = nextDayKey(dateKey);
     var range = useDtLabel(dateKey) + "-" + useDtLabel(out);
     var params = [
-      ["srchInsttId", entry.forest_id],
+      ["srchInsttId", entry.id],
       ["srchRsrvtBgDt", dateKey],
       ["srchRsrvtEdDt", out],
       ["srchSthngCnt", "1"],      // 1박
@@ -565,14 +584,11 @@
     }
 
     $("dlg-body").innerHTML = openHtml + es.map(function (e) {
-      var rooms = e.rooms.map(function (r) {
+      var rooms = hydrateRooms(e.slots).map(function (r) {
         var meta = [];
         if (r.category) meta.push(r.category);
         if (r.capacity != null) meta.push("최대 " + r.capacity + "인");
-        if (r.area != null) {
-          var a = String(r.area);
-          meta.push(/㎡|m2/.test(a) ? a : a + "㎡");
-        }
+        if (r.area != null) meta.push(r.area + "㎡");
         var price = r.price != null
           ? '<strong class="rp">' + r.price.toLocaleString("ko-KR") + "원</strong>"
           : '<span class="rp unknown">가격 미확인</span>';
@@ -580,18 +596,18 @@
           '</span><span class="rm">' + esc(meta.join(" · ")) +
           (meta.length ? " · " : "") + price + "</span></div>";
       }).join("");
-      var q = encodeURIComponent(mapQuery(e.forest));
+      var q = encodeURIComponent(mapQuery(e.name));
       var maps = '<span class="maps">' +
         '<a href="https://map.kakao.com/link/search/' + q + '" target="_blank" rel="noopener">카카오맵</a>' +
         '<a href="https://map.naver.com/p/search/' + q + '" target="_blank" rel="noopener">네이버지도</a>' +
         "</span>";
-      var policy = policyFor(e.forest);
+      var policy = policyFor(e.name);
       var ruleLine = policy && policy.rule
         ? '<div class="rule">예약 오픈: ' + esc(policy.rule) + "</div>"
         : "";
       return '<div class="forest"><h3>' +
         '<a class="fname" href="' + reserveUrl(e, key) + '" target="_blank" rel="noopener"' +
-        ' title="숲나들e 예약 화면으로 이동 (1박 기준)">' + esc(e.forest) + "</a>" +
+        ' title="숲나들e 예약 화면으로 이동 (1박 기준)">' + esc(e.name) + "</a>" +
         '<span class="region">' + esc(e.region || "") + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
@@ -640,7 +656,13 @@
       return r.json();
     })
     .then(function (json) {
+      if (json.v !== 2) {
+        throw new Error("데이터 형식(v" + (json.v || 1) + ")이 이 페이지와 맞지 않습니다");
+      }
       DATA = json;
+      FORESTS = DATA.forests || [];
+      ROOMS = DATA.rooms || [];
+      CATEGORIES = DATA.categories || [];
       var from = DATA.range.from, to = DATA.range.to;
       var seen = {};
       months = [];
@@ -663,7 +685,17 @@
     })
     .catch(function (err) {
       $("meta").textContent = "데이터를 불러오지 못했습니다: " + err.message;
-      $("grid").innerHTML = '<div class="empty-note">docs/data/vacancy.json 이 아직 없습니다. deploy.sh 를 먼저 실행하세요.</div>';
+      // file:// 로 열면 브라우저가 같은 폴더의 JSON 조차 CORS 로 막는다.
+      // 파일이 없는 것과 구분해서 안내한다.
+      var isFile = location.protocol === "file:";
+      $("grid").innerHTML = '<div class="empty-note">' + (isFile
+        ? "브라우저가 <code>file://</code> 로 열린 페이지의 데이터 읽기를 막았습니다.<br>" +
+          "로컬에서 볼 때는 간단한 서버로 띄워 주세요:<br><br>" +
+          "<code>python3 -m http.server 8765 -d docs</code><br>" +
+          "→ http://localhost:8765<br><br>" +
+          "GitHub Pages 에 올린 뒤에는 그냥 주소만 열면 됩니다."
+        : "data/vacancy.json 을 읽지 못했습니다. 배치(deploy.sh)가 한 번은 돌았는지 확인해 주세요."
+      ) + "</div>";
     });
 })();
 </script>
