@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  설치 전 __PROJECT_DIR__ 와 __HOME__ 을 실제 경로로 치환한다:
+
+    sed -e "s|__PROJECT_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
+      launchd/com.foresttrip-calendar.plist > ~/Library/LaunchAgents/com.foresttrip-calendar.plist
+    launchctl load ~/Library/LaunchAgents/com.foresttrip-calendar.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.foresttrip-calendar</string>
+  <!-- deploy.sh = 숲나들e 조회 → 달력 데이터 갱신 → 커밋 → GitHub Pages 푸시까지 -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PROJECT_DIR__/deploy.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_DIR__</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>__PROJECT_DIR__/data/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_DIR__/data/launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- /opt/homebrew/bin : git 푸시 인증(gh credential helper)에 필요 -->
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+</dict>
+</plist>

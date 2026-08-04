@@ -172,6 +172,12 @@
   .forest:last-child { border-bottom: none; }
   .forest h3 { font-size: .92rem; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
   .forest h3 .region { font-size: .75rem; font-weight: 400; color: var(--text-muted); }
+  .forest h3 .fname {
+    color: var(--text-primary); text-decoration: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .forest h3 .fname:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .forest h3 .fname::after { content: " ↗"; font-size: .7rem; color: var(--text-muted); }
   .forest h3 .maps { margin-left: auto; display: flex; gap: 6px; }
   .maps a {
     font-size: .7rem; font-weight: 400; text-decoration: none;
@@ -307,18 +313,48 @@
     return out;
   }
 
-  // 정책(policy.name)은 공백 제거형이라 지점명을 같은 형태로 정규화해 매칭
-  function policyKey(forestName) {
-    return norm(forestName.replace(/^\[[^\]]*\]/, "").replace(/^\([^)]*\)/, ""));
-  }
-
-  var policyByName = {};  // 정규화 지점명 -> {rule, open_day, ...}
+  // 정책 표와 조회 데이터의 지점명 표기가 다르다:
+  //   조회   "[공립](광양시)백운산자연휴양림"
+  //   정책   "광양백운산자연휴양림" (시 이름이 이름에 붙어 있음)
+  // 이름만으로 맞추면 국립 백운산(원주시) 규칙이 엉뚱하게 붙으므로
+  // 운영주체 + 시·군·구까지 일치해야 인정하고, 애매하면 규칙을 표시하지 않는다.
+  var byTypeGu = {};      // "주체|시군구" -> [policy]
+  var byTypeName = {};    // "주체|이름" -> [policy]
   var openByDay = {};     // 매월 고정 오픈일(1~31) -> [policy, ...]
+
   function buildPolicyIndex() {
     (DATA.policies || []).forEach(function (p) {
-      policyByName[p.name] = p;
+      var gu = p.type + "|" + p.sigungu;
+      (byTypeGu[gu] = byTypeGu[gu] || []).push(p);
+      var nm = p.type + "|" + norm(p.name);
+      (byTypeName[nm] = byTypeName[nm] || []).push(p);
       if (p.open_day) (openByDay[p.open_day] = openByDay[p.open_day] || []).push(p);
     });
+  }
+
+  // 두 소스의 이름 표기가 제각각이라 단계적으로 좁힌다. 확정할 수 없으면
+  // null 을 돌려 규칙을 감춘다 — 틀린 오픈일을 보여주는 쪽이 더 나쁘다.
+  function policyFor(forestName) {
+    var type = (forestName.match(/^\s*\[([^\]]*)\]/) || [])[1] || "";
+    var gu = sigungu(forestName);
+    var bare = norm(bareName(forestName));
+    if (!type) return null;
+
+    var group = byTypeGu[type + "|" + gu] || [];
+    var exact = group.filter(function (p) { return norm(p.name) === bare; });
+    if (exact.length === 1) return exact[0];
+    // "광양백운산자연휴양림" ⊃ "백운산자연휴양림" 처럼 시 이름이 붙은 표기
+    var partial = group.filter(function (p) {
+      var n = norm(p.name);
+      return n.indexOf(bare) !== -1 || bare.indexOf(n) !== -1;
+    });
+    if (partial.length === 1) return partial[0];
+    if (group.length === 1) return group[0];
+    // 시·군·구 표기가 어긋나는 경우("대구시" vs "달성군") — 이름이 전국에서
+    // 유일할 때만 인정한다
+    var byName = byTypeName[type + "|" + bare] || [];
+    if (byName.length === 1) return byName[0];
+    return null;
   }
 
   // 해당 날짜에 예약이 오픈되는 휴양림 목록 (휴양림명 필터만 적용)
@@ -448,13 +484,68 @@
     $("grid").innerHTML = weeks.join("");
   }
 
+  // 지점명은 "[공립](강릉시)임해자연휴양림" 형태로 온다.
+  // 운영주체 대괄호와 시·군·구 소괄호를 떼어낸 순수 이름.
+  function bareName(name) {
+    return name.replace(/^\s*\[[^\]]*\]\s*/, "").replace(/^\s*\([^)]*\)\s*/, "").trim();
+  }
+
+  function sigungu(name) {
+    var m = name.match(/^\s*(?:\[[^\]]*\])?\s*\(([^)]*)\)/);
+    return m ? m[1] : "";
+  }
+
+  // 지도 검색어: 대괄호를 그대로 넘기면 두 지도 모두 결과가 0건이 된다.
+  // 시·군·구를 앞에 붙이면 동명 휴양림도 정확히 잡힌다 ("강릉시 임해자연휴양림").
+  function mapQuery(name) {
+    var gu = sigungu(name), bare = bareName(name);
+    return gu ? gu + " " + bare : bare;
+  }
+
+  // 숲나들e 예약 화면으로 직행. _csrf 와 netfunnel_key 는 붙이지 않는다 —
+  // 세션마다 다른 값이라 남의 토큰은 무효이고, 없어도 로그인 상태면 정상 동작한다
+  // (대기열이 걸려 있으면 숲나들e가 알아서 대기 화면을 띄운다).
+  // 비로그인 상태에서는 로그인 화면이 뜨고, 로그인하면 이 화면으로 이어진다.
+  var RESERVE_BASE = "https://www.foresttrip.go.kr/rep/or/sssn/fcfsRsrvtPssblGoodsDetls.do";
+
+  // 날짜선택기 표시용 라벨: 20260829 → "26/08/29(토)"
+  function useDtLabel(key) {
+    var y = +key.slice(0, 4), m = +key.slice(4, 6), d = +key.slice(6);
+    var dow = "일월화수목금토"[new Date(y, m - 1, d).getDay()];
+    return key.slice(2, 4) + "/" + key.slice(4, 6) + "/" + key.slice(6) + "(" + dow + ")";
+  }
+
+  function nextDayKey(key) {
+    var d = new Date(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6) + 1);
+    return "" + d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") +
+      String(d.getDate()).padStart(2, "0");
+  }
+
+  function reserveUrl(entry, dateKey) {
+    if (!entry.forest_id) {  // 지점 ID 없는 구버전 데이터는 통합검색으로 폴백
+      return "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do?srchWord=" +
+        encodeURIComponent(bareName(entry.forest));
+    }
+    var out = nextDayKey(dateKey);
+    var range = useDtLabel(dateKey) + "-" + useDtLabel(out);
+    var params = [
+      ["srchInsttId", entry.forest_id],
+      ["srchRsrvtBgDt", dateKey],
+      ["srchRsrvtEdDt", out],
+      ["srchSthngCnt", "1"],      // 1박
+      ["srchStngNofpr", "2"],     // 기준 인원 (화면에서 변경 가능)
+      ["srchUseDt", range],
+      ["calPicker", range],
+      ["rsrvtWtngSctin", "01"],
+      ["menuId", "001001"],
+      ["hmpgId", "FRIP"]
+    ].map(function (p) { return p[0] + "=" + encodeURIComponent(p[1]); });
+    return RESERVE_BASE + "?" + params.join("&");
+  }
+
   // "[공립](가평군)강씨봉자연휴양림" → "강씨봉" (달력 셀 미리보기용 축약)
   function shortName(name) {
-    return name
-      .replace(/^\[[^\]]*\]/, "")
-      .replace(/^\([^)]*\)/, "")
-      .replace(/^국립\s*/, "")
-      .replace(/자연휴양림$/, "");
+    return bareName(name).replace(/^국립\s*/, "").replace(/자연휴양림$/, "");
   }
 
   function openDetail(key) {
@@ -489,16 +580,18 @@
           '</span><span class="rm">' + esc(meta.join(" · ")) +
           (meta.length ? " · " : "") + price + "</span></div>";
       }).join("");
-      var q = encodeURIComponent(e.forest);
+      var q = encodeURIComponent(mapQuery(e.forest));
       var maps = '<span class="maps">' +
         '<a href="https://map.kakao.com/link/search/' + q + '" target="_blank" rel="noopener">카카오맵</a>' +
         '<a href="https://map.naver.com/p/search/' + q + '" target="_blank" rel="noopener">네이버지도</a>' +
         "</span>";
-      var policy = policyByName[policyKey(e.forest)];
+      var policy = policyFor(e.forest);
       var ruleLine = policy && policy.rule
         ? '<div class="rule">예약 오픈: ' + esc(policy.rule) + "</div>"
         : "";
-      return '<div class="forest"><h3>' + esc(e.forest) +
+      return '<div class="forest"><h3>' +
+        '<a class="fname" href="' + reserveUrl(e, key) + '" target="_blank" rel="noopener"' +
+        ' title="숲나들e 예약 화면으로 이동 (1박 기준)">' + esc(e.forest) + "</a>" +
         '<span class="region">' + esc(e.region || "") + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
