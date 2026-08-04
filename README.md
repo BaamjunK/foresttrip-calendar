@@ -5,11 +5,21 @@
 
 - 조회 범위: 오늘 ~ **다음 달 말일** (달력 탭 2개월)
 - 카테고리: 숙박(01)만 — 캠핑/야영(02)은 제외
-- 필터: 지역(시·도) / 가격(1박 상한) / 휴양림명
+- 필터: 지역(시·도) / 인원(N인 이상 수용) / 1박 요금 범위(만원 단위 직접 입력) / 휴양림명
+  · 조건을 통과한 객실이 없는 지점은 그 날짜에서 빠지고, 요금 조건이 걸리면
+  "가격 미확인" 객실은 제외된다(판정 불가). 최소·최대를 거꾸로 넣으면 자동 교환.
 - 상세 팝업: 객실별 요금·정원·면적, 휴양림명 클릭 시 숲나들e 예약 화면(해당 지점·날짜)으로 이동,
   카카오맵·네이버지도 바로가기, 예약 오픈 규칙
 - 예약 오픈일: "매월 N일 오픈" 규칙인 휴양림을 달력에 🔔 로 표시
 - 조회 엔진: https://github.com/NomaDamas/k-skill/tree/main/foresttrip-vacancy 스크립트를 `vendor/` 에 vendoring (MIT, 로컬 패치 2건 — 파일 상단 주석 참고)
+
+## 라이선스
+
+이 저장소의 코드는 MIT 라이선스다([LICENSE](LICENSE)).
+
+`vendor/run_foresttrip_vacancy.py` 는 [NomaDamas/k-skill](https://github.com/NomaDamas/k-skill)
+의 foresttrip-vacancy 스크립트를 가져온 것으로, 원본도 MIT 라이선스다. MIT 가 요구하는
+저작권·허가 고지는 [vendor/LICENSE](vendor/LICENSE) 에 원문 그대로 보존했다.
 
 ## 구조
 

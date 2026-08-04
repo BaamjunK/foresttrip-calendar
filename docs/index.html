@@ -101,9 +101,30 @@
     border: 1px solid var(--border); background: var(--surface-1);
     color: var(--text-primary); font-size: .9rem;
   }
-  .controls input { flex: 1 1 180px; }
+  .controls input[type="search"] { flex: 1 1 140px; min-width: 110px; }
   .controls select { flex: 0 0 auto; cursor: pointer; }
   .controls input:focus, .controls select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .pricebox {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface-1); padding: 0 10px 0 4px;
+  }
+  .pricebox input {
+    width: 58px; border: none; background: none; padding: 8px 4px;
+    font-size: .9rem; font-variant-numeric: tabular-nums; text-align: right;
+  }
+  .pricebox input:focus { outline: none; }
+  .pricebox:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .pricebox .tilde { color: var(--text-muted); font-size: .85rem; }
+  .pricebox .unit { color: var(--text-secondary); font-size: .8rem; }
+
+  #reset {
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary);
+    font-size: .85rem; cursor: pointer;
+  }
+  #reset:hover { border-color: var(--accent); color: var(--accent-ink); }
   .tabs { display: flex; gap: 6px; }
   .tabs button {
     padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
@@ -234,14 +255,26 @@
     <select id="region" aria-label="지역 필터">
       <option value="">전체 지역</option>
     </select>
-    <select id="price" aria-label="가격 필터">
-      <option value="0">전체 가격</option>
-      <option value="50000">5만원 이하</option>
-      <option value="100000">10만원 이하</option>
-      <option value="150000">15만원 이하</option>
-      <option value="200000">20만원 이하</option>
+    <select id="people" aria-label="인원 필터">
+      <option value="0">인원 전체</option>
+      <option value="2">2인 이상</option>
+      <option value="4">4인 이상</option>
+      <option value="6">6인 이상</option>
+      <option value="8">8인 이상</option>
+      <option value="10">10인 이상</option>
+      <option value="15">15인 이상</option>
+      <option value="20">20인 이상</option>
     </select>
-    <input id="filter" type="search" placeholder="휴양림명 필터" autocomplete="off">
+    <span class="pricebox">
+      <input id="pmin" type="number" min="0" step="1" placeholder="최소"
+             inputmode="numeric" aria-label="최소 요금(만원)">
+      <span class="tilde">~</span>
+      <input id="pmax" type="number" min="0" step="1" placeholder="최대"
+             inputmode="numeric" aria-label="최대 요금(만원)">
+      <span class="unit">만원</span>
+    </span>
+    <input id="filter" type="search" placeholder="휴양림명" autocomplete="off">
+    <button id="reset" type="button" hidden>필터 초기화</button>
   </div>
 
   <div class="cal">
@@ -278,7 +311,9 @@
   var current = 0;       // months 인덱스
   var filterText = "";
   var regionFilter = "";
-  var maxPrice = 0;      // 0 = 전체 가격
+  var minPrice = 0;      // 원 단위, 0 = 하한 없음
+  var maxPrice = 0;      // 원 단위, 0 = 상한 없음
+  var minPeople = 0;     // 최소 수용 인원, 0 = 전체
 
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
@@ -295,14 +330,34 @@
       String(now.getDate()).padStart(2, "0");
   }
 
-  // 필터(지역 + 가격 + 휴양림명) 적용된 해당 날짜의 지점 목록.
+  function roomFilterOn() {
+    return minPrice > 0 || maxPrice > 0 || minPeople > 0;
+  }
+
+  // 객실 단위 조건(요금 범위·수용 인원). 요금 조건이 걸리면 "가격 미확인"(0)은
+  // 판정이 불가능하므로 제외한다. 인원 조건만 걸린 경우엔 요금과 무관하게 남긴다.
+  function slotPasses(s) {
+    var price = s[1];
+    if (minPrice > 0 || maxPrice > 0) {
+      if (!price) return false;
+      if (minPrice > 0 && price < minPrice) return false;
+      if (maxPrice > 0 && price > maxPrice) return false;
+    }
+    if (minPeople > 0) {
+      var r = ROOMS[s[0]];
+      if (!r || !r[2] || r[2] < minPeople) return false;
+    }
+    return true;
+  }
+
+  // 필터(지역 + 요금 + 인원 + 휴양림명) 적용된 해당 날짜의 지점 목록.
   // 반환 원소는 {name, id, region, slots} — slots 는 [객실idx, 요금] 쌍 그대로다.
   // 객실 상세는 팝업을 열 때만 풀어내므로 달력 렌더링은 마스터 조회 몇 번으로 끝난다.
-  // 가격 필터는 예산 안의 객실만 남기고, 남는 객실이 없는 지점은 제외한다
-  // (요금 0 = 미확인은 예산 판정이 불가능하므로 함께 제외된다).
+  // 객실 조건을 통과한 객실이 하나도 없는 지점은 그 날짜에서 빠진다.
   function entriesFor(dateKey) {
     var list = (DATA.days && DATA.days[dateKey]) || [];
     var needle = filterText ? norm(filterText) : null;
+    var byRoom = roomFilterOn();
     var out = [];
     for (var i = 0; i < list.length; i++) {
       var f = FORESTS[list[i][0]];
@@ -310,8 +365,8 @@
       if (regionFilter && f[2] !== regionFilter) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
       var slots = list[i][1];
-      if (maxPrice > 0) {
-        slots = slots.filter(function (s) { return s[1] > 0 && s[1] <= maxPrice; });
+      if (byRoom) {
+        slots = slots.filter(slotPasses);
         if (!slots.length) continue;
       }
       out.push({ name: f[0], id: f[1], region: f[2], slots: slots });
@@ -408,18 +463,21 @@
   function renderTiles() {
     var from = DATA.range.from || "", to = DATA.range.to || "";
     var dayKeys = Object.keys(DATA.days || {});
-    var availDays = 0, forestSet = {};
+    var availDays = 0, forestSet = {}, roomCount = 0;
     dayKeys.forEach(function (k) {
       var es = entriesFor(k);
       if (es.length) {
         availDays++;
-        es.forEach(function (e) { forestSet[e.name] = 1; });
+        es.forEach(function (e) {
+          forestSet[e.name] = 1;
+          roomCount += e.slots.length;
+        });
       }
     });
     var html =
-      tile("조회 지점", DATA.forests_scanned, "곳") +
-      tile("빈자리 있는 날", availDays, "일") +
-      tile("빈자리 지점", Object.keys(forestSet).length, "곳");
+      tile("조건에 맞는 날", availDays, "일") +
+      tile("휴양림", Object.keys(forestSet).length, "곳") +
+      tile("객실", roomCount.toLocaleString("ko-KR"), "건");
     if (DATA.fetch_failures > 0) {
       html += tile("조회 실패", DATA.fetch_failures, "건");
     }
@@ -427,7 +485,7 @@
 
     var gen = DATA.generated_at ? DATA.generated_at.replace("T", " ").slice(0, 16) : "?";
     $("meta").textContent = fmtDate(from) + " ~ " + fmtDate(to) +
-      " · 마지막 갱신 " + gen;
+      " · 전국 " + DATA.forests_scanned + "곳 조회 · 마지막 갱신 " + gen;
 
     var banners = "";
     if (DATA.sample) {
@@ -615,6 +673,7 @@
   }
 
   function rerender() {
+    $("reset").hidden = !(regionFilter || minPeople || minPrice || maxPrice || filterText);
     renderTiles();
     renderTabs();
     renderGrid();
@@ -636,8 +695,29 @@
     regionFilter = this.value;
     rerender();
   });
-  $("price").addEventListener("change", function () {
-    maxPrice = parseInt(this.value, 10) || 0;
+  $("people").addEventListener("change", function () {
+    minPeople = parseInt(this.value, 10) || 0;
+    rerender();
+  });
+
+  // 요금 입력은 만원 단위 — 사람이 쓰는 단위로 받고 내부에서는 원으로 다룬다
+  function readPrices() {
+    var lo = parseFloat($("pmin").value), hi = parseFloat($("pmax").value);
+    minPrice = lo > 0 ? Math.round(lo * 10000) : 0;
+    maxPrice = hi > 0 ? Math.round(hi * 10000) : 0;
+    // 거꾸로 넣었으면 뒤집어 준다 (빈 결과를 보여주는 것보다 낫다)
+    if (minPrice && maxPrice && minPrice > maxPrice) {
+      var t = minPrice; minPrice = maxPrice; maxPrice = t;
+    }
+    rerender();
+  }
+  $("pmin").addEventListener("input", readPrices);
+  $("pmax").addEventListener("input", readPrices);
+
+  $("reset").addEventListener("click", function () {
+    $("region").value = ""; $("people").value = "0";
+    $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
+    regionFilter = ""; minPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     rerender();
   });
   $("grid").addEventListener("click", function (ev) {
