@@ -1,4 +1,6 @@
 .venv/
-data/
+# 배치 작업 파일만 제외한다. 앞의 슬래시가 없으면 docs/data/ 까지 무시되어
+# 달력 데이터가 배포에서 빠진다.
+/data/
 __pycache__/
 .DS_Store
