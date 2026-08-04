@@ -135,14 +135,18 @@ if [ -z "$(git status --porcelain -- docs/)" ]; then
   exit 0
 fi
 
+# schema v2: days[날짜] = [[지점idx, [[객실idx, 요금], …]], …]
 SUMMARY=$("$PYTHON" - <<'PY'
 import json
 d = json.load(open('docs/data/vacancy.json'))
 days = d['days']
-forests = {e['forest'] for v in days.values() for e in v}
-print(f"{len(days)}일 / {len(forests)}개 지점")
+forests = {g[0] for v in days.values() for g in v}
+priced = sum(1 for v in days.values() for g in v for s in g[1] if s[1])
+slots = sum(len(g[1]) for v in days.values() for g in v)
+print(f"{len(days)}일 / {len(forests)}개 지점 / 요금 {priced}/{slots}")
 PY
 )
+[ -z "$SUMMARY" ] && SUMMARY="(요약 실패)"
 
 git add docs/
 if ! git commit -q -m "달력 갱신: 빈자리 $SUMMARY $(date '+%Y-%m-%d %H:%M')"; then
