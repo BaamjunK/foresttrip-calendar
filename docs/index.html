@@ -424,7 +424,7 @@
         var opens = opensFor(d);
         if (es.length) {
           cls.push("has");
-          cls.push(es.length >= 10 ? "t3" : es.length >= 3 ? "t2" : "t1");
+          cls.push(es.length >= 100 ? "t3" : es.length >= 40 ? "t2" : "t1");
           inner += '<div class="badge">' + es.length + "곳</div>";
           var names = es.slice(0, 2).map(function (e) {
             return "<div>" + esc(shortName(e.forest)) + "</div>";
