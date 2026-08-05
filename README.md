@@ -33,6 +33,7 @@ deploy.sh                  일배치 진입점: 조회 → 가격 → 정책 →
 vendor/run_foresttrip_vacancy.py   k-skill 조회 스크립트 (Playwright 로그인 + JSON 조회)
 batch/fetch_prices.py      객실별 1박 요금 조회 (조합별 1회 호출 + 영구 캐시)
 batch/fetch_policy.py      예약 오픈 정책 페이지 파싱 (공개 페이지)
+batch/fetch_lottery.py     오픈일 있는 지점의 추첨 병행 여부 판정 (지점 소개 페이지)
 batch/transform.py         raw JSON + 정책 → docs/data/vacancy.json 변환
 docs/index.html            달력 페이지 (GitHub Pages, 정적/의존성 없음)
 docs/data/vacancy.json     달력이 읽는 데이터 (배치가 갱신, schema v2 · 약 700KB)
@@ -55,6 +56,14 @@ data/                      raw.json, price_cache.json, directory.json, launchd.l
   정책 표와 조회 데이터의 지점명 표기가 달라(`[공립](광양시)백운산자연휴양림` vs
   `광양백운산자연휴양림`) 운영주체·시·군·구·이름을 단계적으로 좁혀 매칭하고,
   확정하지 못하면 규칙을 감춘다(틀린 오픈일 표시 방지).
+- **추첨 병행 판정**: 정책 표의 선착순/추첨 칸은 실제와 어긋난다(추첨 칸에 값이
+  있는 강씨봉·석모도는 지점 페이지에 추첨이 없고, 안면도는 실제로 추첨을 운영한다).
+  그래서 `fetch_lottery.py` 가 오픈일이 있는 지점의 소개 페이지를 매일 확인해
+  "추첨" 운영 흔적이 있는 곳만 골라내고, 달력은 그 지점에만 "추첨 병행" 배지를
+  붙인다. 확인 결과는 대체로 소수다(2026-08 기준 56곳 중 4곳: 안면도·원산도·
+  용인·의왕바라산). 조회 실패한 지점은 배지를 붙이지 않는다(단정하지 않음).
+  **정책 표의 오픈일이 어느 달 이용분인지는 어디에도 없다** — 그 회차가 이미
+  마감됐는지는 달력으로 알 수 없어 안내문으로만 짚어 준다.
 - **바깥에서 걸 수 있는 링크**: 예약 화면(`fcfsRsrvtPssblGoodsDetls.do`)으로 지점·
   날짜를 실어 보내는 딥링크는 쓸 수 없다. 숲나들e 가 Referer 를 검사해 자기
   사이트에서 온 요청이 아니면 **404** 를 준다(로그인 여부·날짜 유무와 무관).

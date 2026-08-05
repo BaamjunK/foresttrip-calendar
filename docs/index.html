@@ -177,6 +177,11 @@
     background: var(--surface-1); color: var(--text-primary);
     width: min(560px, calc(100vw - 32px)); max-height: 80vh; box-shadow: var(--shadow);
   }
+  /* 내용이 max-height 를 넘으면 본문만 스크롤되어야 한다. dialog 가 block 이면
+     본문이 제한을 못 받아 팝업이 화면 위아래로 삐져나간다(빈자리 수십 곳인
+     날짜에서 오픈 섹션이 헤더 위로 잘려 나갔다). open 상태에서만 flex 로 만들어
+     닫힘(display:none)을 깨지 않는다. */
+  dialog[open] { display: flex; flex-direction: column; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
   .dlg-head {
     display: flex; justify-content: space-between; align-items: center;
@@ -188,7 +193,8 @@
     border: none; background: none; font-size: 1.2rem; cursor: pointer;
     color: var(--text-secondary); padding: 4px 8px;
   }
-  .dlg-body { padding: 10px 18px 18px; overflow-y: auto; }
+  /* min-height:0 이 없으면 flex 아이템이 내용 높이만큼 부풀어 스크롤이 안 생긴다 */
+  .dlg-body { padding: 10px 18px 18px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
   .forest { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .forest:last-child { border-bottom: none; }
   .forest h3 { font-size: .92rem; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
@@ -236,6 +242,10 @@
   .open-row .ol a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
   .open-row .ol a::after { content: " ↗"; font-size: .68rem; color: var(--text-muted); }
   .otag { font-style: normal; font-size: .68rem; color: var(--text-muted); }
+  .otag.lot {
+    color: var(--warn-ink); border: 1px solid var(--warn-ink);
+    border-radius: 999px; padding: 0 6px; opacity: .85;
+  }
 
   footer { margin-top: 18px; font-size: .75rem; color: var(--text-muted); }
   footer a { color: inherit; }
@@ -316,6 +326,7 @@
   // 객체로 펼치면 메모리만 낭비된다).
   var FORESTS = [];      // [이름, 지점ID, 지역] — 빈자리가 있어 달력에 실린 지점
   var DIRECTORY = [];    // 같은 형식의 전 지점 목록(빈자리 없는 곳 포함)
+  var LOTTERY = {};      // 지점ID -> true (월추첨제 병행, 배치가 매일 판정)
   var ROOMS = [];        // [이름, 유형idx, 정원, 면적]
   var CATEGORIES = [];
   var months = [];       // ["202608","202609"]
@@ -768,16 +779,18 @@
           // 폴백 검색어는 띄어쓰기가 살아 있는 정책 표 원문(label)을 쓴다
           // (name 은 공백을 지운 매칭 전용이라 검색이 0건으로 뜬다).
           var href = forestUrl(f && f[1], p.label || p.name);
+          var lot = f && f[1] && LOTTERY[f[1]]
+            ? '<em class="otag lot">추첨 병행</em>' : "";
           return '<div class="open-row">' +
             '<span class="ol"><a href="' + href + '" target="_blank" rel="noopener">' +
             esc(bareName(p.label || p.name)) + "</a>" +
-            '<em class="otag">' + esc(where) + "</em></span>" +
+            '<em class="otag">' + esc(where) + "</em>" + lot + "</span>" +
             "<span>" + esc(p.rule) + "</span></div>";
         }).join("") +
         '<p class="open-note">휴양림이 공고한 정기 오픈일입니다. 대부분 선착순 ' +
-        '예약이 열리는 날이지만, 안면도·원산도·용인·의왕바라산처럼 월추첨제를 ' +
-        '함께 운영하는 곳은 추첨 신청일일 수 있습니다. 어느 달 이용분인지와 ' +
-        '마감 여부는 각 휴양림 페이지에서 확인하세요.</p></div>';
+        '예약이 열리는 날이고, "추첨 병행"으로 표시된 곳은 추첨 신청일일 수 ' +
+        '있습니다. 어느 달 이용분인지와 마감 여부는 각 휴양림 페이지에서 ' +
+        '확인하세요.</p></div>';
     }
 
     $("dlg-body").innerHTML = openHtml + es.map(function (e) {
@@ -808,6 +821,9 @@
         '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
+    // 스크롤을 되돌리지 않으면 앞서 본 날짜의 위치가 남아 새 내용이
+    // 중간부터 보인다(오픈 섹션이 헤더 아래로 잘려 들어간다).
+    $("dlg-body").scrollTop = 0;
     $("dlg").showModal();
   }
 
@@ -896,6 +912,8 @@
       DATA = json;
       FORESTS = DATA.forests || [];
       DIRECTORY = DATA.directory || [];
+      LOTTERY = {};
+      (DATA.lottery_ids || []).forEach(function (id) { LOTTERY[id] = true; });
       ROOMS = DATA.rooms || [];
       CATEGORIES = DATA.categories || [];
       var from = DATA.range.from, to = DATA.range.to;

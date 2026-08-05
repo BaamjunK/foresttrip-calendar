@@ -145,9 +145,16 @@ if ! "$PYTHON" batch/fetch_policy.py data/policy.json; then
   log "⚠ 정책 수집 실패 — 기존 정책으로 진행"
 fi
 
+# ── 추첨 병행 여부 (오픈일 있는 지점의 공개 소개 페이지 확인) ─────────
+# 정책 표의 선착순/추첨 칸은 실제와 어긋나므로 지점 페이지를 직접 본다.
+log "추첨 병행 여부 확인"
+if ! "$PYTHON" batch/fetch_lottery.py data/policy.json data/directory.json data/lottery.json; then
+  log "⚠ 추첨 여부 확인 실패 — 기존 결과로 진행"
+fi
+
 # ── 변환 → docs/data/vacancy.json ───────────────────────────────────
 if ! "$PYTHON" batch/transform.py data/raw_priced.json docs/data/vacancy.json \
-     data/policy.json data/directory.json; then
+     data/policy.json data/directory.json data/lottery.json; then
   log "✗ 변환 실패 — 배포 중단"
   exit 1
 fi
