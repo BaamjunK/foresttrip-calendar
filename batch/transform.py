@@ -60,7 +60,9 @@ def parse_int(value) -> int:
         return 0
 
 
-def transform(raw: dict, policies: list | None = None) -> dict:
+def transform(
+    raw: dict, policies: list | None = None, directory: list | None = None
+) -> dict:
     categories: list[str] = []
     cat_idx: dict[str, int] = {}
     forests: list[list] = []
@@ -119,6 +121,9 @@ def transform(raw: dict, policies: list | None = None) -> dict:
         "forests_scanned": raw.get("forests_scanned", 0),
         "fetch_failures": raw.get("fetch_failures", 0),
         "policies": policies or [],
+        # 빈자리 유무와 무관한 전 지점 목록 [이름, 지점ID, 시·도].
+        # 예약 오픈 목록에서 빈자리 없는 휴양림도 지점 페이지로 링크하는 데 쓴다.
+        "directory": directory or [],
         "categories": categories,
         "forests": forests,
         "rooms": rooms,
@@ -126,20 +131,29 @@ def transform(raw: dict, policies: list | None = None) -> dict:
     }
 
 
+def load_optional(path: str | None):
+    """없거나 깨진 부가 파일은 건너뛴다 — 달력 본체는 그대로 배포한다."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def main() -> int:
-    if len(sys.argv) not in (3, 4):
-        print("usage: transform.py <raw.json> <vacancy.json> [policy.json]", file=sys.stderr)
+    if len(sys.argv) not in (3, 4, 5):
+        print(
+            "usage: transform.py <raw.json> <vacancy.json> [policy.json] [directory.json]",
+            file=sys.stderr,
+        )
         return 2
     with open(sys.argv[1], encoding="utf-8") as f:
         raw = json.load(f)
-    policies = None
-    if len(sys.argv) == 4:
-        try:
-            with open(sys.argv[3], encoding="utf-8") as f:
-                policies = json.load(f)
-        except (OSError, ValueError):
-            pass  # 정책 파일이 없거나 깨져도 달력 본체는 배포한다
-    out = transform(raw, policies)
+    policies = load_optional(sys.argv[3] if len(sys.argv) > 3 else None)
+    directory = load_optional(sys.argv[4] if len(sys.argv) > 4 else None)
+    out = transform(raw, policies, directory)
     with open(sys.argv[2], "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 

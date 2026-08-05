@@ -37,7 +37,7 @@ batch/transform.py         raw JSON + 정책 → docs/data/vacancy.json 변환
 docs/index.html            달력 페이지 (GitHub Pages, 정적/의존성 없음)
 docs/data/vacancy.json     달력이 읽는 데이터 (배치가 갱신, schema v2 · 약 700KB)
 launchd/…plist             매일 08:00 자동 실행 등록용
-data/                      raw.json, price_cache.json, launchd.log (git 제외)
+data/                      raw.json, price_cache.json, directory.json, launchd.log (git 제외)
 ```
 
 동작 원리:
@@ -61,9 +61,11 @@ data/                      raw.json, price_cache.json, launchd.log (git 제외)
   브라우저는 Referer 를 위조할 수 없고 `rel="noreferrer"` 로 지워도 404 다.
   대신 휴양림 소개 페이지 `selectFcltSrchView.do?insttId=<지점ID>` 로 보낸다 —
   Referer 를 가리지 않고 로그인도 필요 없으며 그 화면에 예약 버튼이 있다.
-  지점 ID 를 모르는 경우(정책 표에만 있고 빈자리가 없어 달력에 안 실린 곳)만
-  통합검색으로 폴백한다. 검색은 등록 표기가 제각각이라 마지막 수단이다
-  ("덕적도 자연휴양림" 1건인데 붙여 쓰면 0건, 반대로 띄우면 0건인 곳도 있다).
+  지점 ID 는 로그인할 때 얻는 전 지점 목록(`data/directory.json`, 시·도 드롭다운을
+  훑어 받은 186곳)에서 찾는다. 조회 결과에는 빈자리가 있는 지점만 남아서,
+  이 목록이 없으면 "수락산 동막골"처럼 그 기간 빈자리가 없는 휴양림을 링크할 수
+  없다. 그래도 못 찾으면 통합검색으로 폴백하는데, 검색은 등록 표기가 제각각이라
+  마지막 수단이다("덕적도 자연휴양림" 1건인데 붙여 쓰면 0건, 반대 사례도 있다).
 - **운영주체**: 지점명 앞의 `[국립]`/`[공립]`/`[사립]` 이 그대로 필터가 된다
   (조회 결과 기준 국립 41 · 공립 121 · 사립 11곳). 국립은 예약 오픈이 "선착순
   6주 전 수요일 / 추첨제"라 매월 고정일이 없어 달력의 🔔 오픈 마커에는 잡히지

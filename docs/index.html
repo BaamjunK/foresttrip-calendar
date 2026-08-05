@@ -310,7 +310,8 @@
   // vacancy.json 은 중복을 걷어낸 인덱스 참조형(schema v2)이다. 마스터 배열을
   // 그대로 들고, 날짜별 데이터는 필요한 순간에만 풀어 쓴다(5만 건을 미리
   // 객체로 펼치면 메모리만 낭비된다).
-  var FORESTS = [];      // [이름, 지점ID, 지역]
+  var FORESTS = [];      // [이름, 지점ID, 지역] — 빈자리가 있어 달력에 실린 지점
+  var DIRECTORY = [];    // 같은 형식의 전 지점 목록(빈자리 없는 곳 포함)
   var ROOMS = [];        // [이름, 유형idx, 정원, 면적]
   var CATEGORIES = [];
   var months = [];       // ["202608","202609"]
@@ -458,9 +459,15 @@
 
   function buildForestLinks() {
     forestOfPolicy = new Map();
-    FORESTS.forEach(function (f) {
-      var p = policyFor(f[0]);
-      if (p && !forestOfPolicy.has(p)) forestOfPolicy.set(p, f);
+    // 달력에 실린 지점을 먼저 연결하고(그쪽 지역 정보가 조회 결과와 일치한다),
+    // 빈자리가 없어 안 실린 지점은 전 지점 목록에서 마저 채운다.
+    // 이게 없으면 "수락산 동막골"처럼 그 기간 빈자리가 없는 곳은 지점 ID 를
+    // 못 찾아 검색 폴백으로 밀린다.
+    [FORESTS, DIRECTORY].forEach(function (source) {
+      source.forEach(function (f) {
+        var p = policyFor(f[0]);
+        if (p && !forestOfPolicy.has(p)) forestOfPolicy.set(p, f);
+      });
     });
   }
 
@@ -875,6 +882,7 @@
       }
       DATA = json;
       FORESTS = DATA.forests || [];
+      DIRECTORY = DATA.directory || [];
       ROOMS = DATA.rooms || [];
       CATEGORIES = DATA.categories || [];
       var from = DATA.range.from, to = DATA.range.to;

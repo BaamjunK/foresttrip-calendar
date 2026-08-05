@@ -108,6 +108,30 @@ if ! valid_result; then
 fi
 [ "$RC" -ne 0 ] && log "⚠ 일부 지점 조회 실패 — 페이지에 실패 건수로 표기됩니다."
 
+# ── 전체 지점 디렉터리 ───────────────────────────────────────────────
+# 로그인할 때 시·도 드롭다운을 훑어 얻은 전 지점 목록이 세션 캐시에 들어 있다.
+# 조회 결과에는 빈자리가 있는 지점만 남으므로, 예약 오픈 목록처럼 빈자리가 없는
+# 휴양림을 링크하려면 이 목록이 있어야 지점 ID 를 찾을 수 있다.
+if ! "$PYTHON" - <<'PY'
+import json, sys
+from pathlib import Path
+cache = Path("~/.cache/k-skill/foresttrip-vacancy/session.json").expanduser()
+try:
+    s = json.loads(cache.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+sidos = s.get("sidos", {})
+rows = [[nm, fid, sidos.get(fid, "")]
+        for fid, nm in sorted(s.get("forests", {}).items(), key=lambda kv: kv[1])]
+if not rows:
+    sys.exit(1)
+Path("data/directory.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+print(f"지점 디렉터리 {len(rows)}곳")
+PY
+then
+  log "⚠ 지점 디렉터리 추출 실패 — 기존 파일로 진행"
+fi
+
 # ── 가격 부여 (조합별 1회 호출 + 영구 캐시, 실패해도 배포는 진행) ────
 log "가격 조회(캐시 증분) 시작"
 if ! "$PYTHON" batch/fetch_prices.py data/raw.json data/raw_priced.json; then
@@ -122,7 +146,8 @@ if ! "$PYTHON" batch/fetch_policy.py data/policy.json; then
 fi
 
 # ── 변환 → docs/data/vacancy.json ───────────────────────────────────
-if ! "$PYTHON" batch/transform.py data/raw_priced.json docs/data/vacancy.json data/policy.json; then
+if ! "$PYTHON" batch/transform.py data/raw_priced.json docs/data/vacancy.json \
+     data/policy.json data/directory.json; then
   log "✗ 변환 실패 — 배포 중단"
   exit 1
 fi
