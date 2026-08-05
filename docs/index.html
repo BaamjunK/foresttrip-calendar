@@ -380,7 +380,7 @@
     for (var i = 0; i < list.length; i++) {
       var f = FORESTS[list[i][0]];
       if (!f) continue;
-      if (regionFilter && f[2] !== regionFilter) continue;
+      if (regionFilter && FOREST_WIDE[list[i][0]] !== regionFilter) continue;
       if (typeFilter && operatorType(f[0]) !== typeFilter) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
       var slots = list[i][1];
@@ -476,7 +476,9 @@
           !(f && norm(f[0]).indexOf(needle) !== -1)) return false;
       if (typeFilter && p.type !== typeFilter) return false;
       if (regionFilter) {
-        if (!f || f[2] !== regionFilter) return false;
+        // 달력에 실린 지점이면 그 지점의 광역, 아니면 정책 표 값으로 판정한다
+        var w = f ? wideArea(f[2], sigungu(f[0])) : wideArea(p.region, p.sigungu);
+        if (w !== regionFilter) return false;
       }
       return true;
     });
@@ -485,8 +487,11 @@
   function populateRegions() {
     // 지점 마스터에는 빈자리가 있는 지점만 담겨 있어 그대로 지역 목록이 된다
     var seen = {};
-    FORESTS.forEach(function (f) { if (f[2]) seen[f[2]] = 1; });
-    var opts = Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, "ko"); });
+    FOREST_WIDE.forEach(function (w) { if (w) seen[w] = 1; });
+    var opts = Object.keys(seen).sort(function (a, b) {
+      var ia = WIDE_ORDER.indexOf(a), ib = WIDE_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
     $("region").innerHTML = '<option value="">전체 지역</option>' +
       opts.map(function (r) { return "<option>" + esc(r) + "</option>"; }).join("");
   }
@@ -637,46 +642,87 @@
     return gu ? gu + " " + bare : bare;
   }
 
-  // 숲나들e 예약 화면으로 직행. _csrf 와 netfunnel_key 는 붙이지 않는다 —
-  // 세션마다 다른 값이라 남의 토큰은 무효이고, 없어도 로그인 상태면 정상 동작한다
-  // (대기열이 걸려 있으면 숲나들e가 알아서 대기 화면을 띄운다).
-  // 비로그인 상태에서는 로그인 화면이 뜨고, 로그인하면 이 화면으로 이어진다.
-  var RESERVE_BASE = "https://www.foresttrip.go.kr/rep/or/sssn/fcfsRsrvtPssblGoodsDetls.do";
+  // 숲나들e 진입점.
+  //
+  // 예약 화면(fcfsRsrvtPssblGoodsDetls.do)으로 지점·날짜를 실어 직행하는 딥링크는
+  // 쓸 수 없다. 숲나들e 가 Referer 를 검사해서, 자기 사이트 안에서 온 요청이
+  // 아니면 404 를 준다(로그인 여부와 무관·날짜 유무와 무관). 외부 페이지인
+  // 우리 달력에서는 어떤 방법으로도 통과할 수 없다 — rel="noreferrer" 로 Referer 를
+  // 지워도 404 이고, 브라우저는 Referer 를 위조할 수 없다.
+  //
+  // 대신 휴양림 소개 페이지(selectFcltSrchView.do)로 보낸다. 지점 ID 하나만
+  // 있으면 되고 Referer 를 가리지 않으며(로그인 여부도 무관), 그 안에 예약 버튼이
+  // 있어 한 번 더 눌러 예약으로 넘어갈 수 있다.
+  //
+  // 지점 ID 를 모르는 경우(정책 표에만 있고 빈자리가 없어 달력에 안 실린 곳)만
+  // 통합검색으로 폴백한다. 검색은 등록 표기가 제각각이라("덕적도 자연휴양림" 1건 /
+  // 붙여 쓰면 0건, 반대로 띄우면 0건인 곳도 있다) 마지막 수단으로만 쓴다.
+  var FCLT_BASE = "https://www.foresttrip.go.kr/pot/is/fs/selectFcltSrchView.do" +
+    "?hmpgId=FRIP&menuId=002001&insttId=";
+  var SEARCH_BASE = "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do";
 
-  // 날짜선택기 표시용 라벨: 20260829 → "26/08/29(토)"
-  function useDtLabel(key) {
-    var y = +key.slice(0, 4), m = +key.slice(4, 6), d = +key.slice(6);
-    var dow = "일월화수목금토"[new Date(y, m - 1, d).getDay()];
-    return key.slice(2, 4) + "/" + key.slice(4, 6) + "/" + key.slice(6) + "(" + dow + ")";
+  function searchUrl(forestName) {
+    return SEARCH_BASE + "?srchWord=" + encodeURIComponent(bareName(forestName));
   }
 
-  function nextDayKey(key) {
-    var d = new Date(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6) + 1);
-    return "" + d.getFullYear() + String(d.getMonth() + 1).padStart(2, "0") +
-      String(d.getDate()).padStart(2, "0");
+  function forestUrl(insttId, fallbackName) {
+    return insttId ? FCLT_BASE + encodeURIComponent(insttId) : searchUrl(fallbackName);
   }
 
-  function reserveUrl(entry, dateKey) {
-    if (!entry.id) {  // 지점 ID 를 모르면 통합검색으로 폴백
-      return "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do?srchWord=" +
-        encodeURIComponent(bareName(entry.name));
+  // ── 지역 표기 ─────────────────────────────────────────────
+  // 숲나들e 의 지역 값은 "서울/인천/경기", "대구경북" 처럼 여러 시·도가 묶여 있어
+  // 그대로 쓰면 길고 어디인지도 흐릿하다. 묶음 안에서 시·군·구로 광역시/도를
+  // 가려내 "서울 노원구", "경기 가평" 처럼 짧게 만든다.
+  // 같은 "동구·서구"라도 묶음이 다르면 다른 지역이므로 묶음별로 목록을 나눠 둔다.
+  var SEOUL_GU = ("종로구 중구 용산구 성동구 광진구 동대문구 중랑구 성북구 강북구 도봉구 " +
+    "노원구 은평구 서대문구 마포구 양천구 강서구 구로구 금천구 영등포구 동작구 " +
+    "관악구 서초구 강남구 송파구 강동구").split(" ");
+  var INCHEON = "인천시 강화군 옹진군 영종구 미추홀구 연수구 남동구 부평구 계양구".split(" ");
+  var DAEGU = "대구시 달성군 군위군 수성구 달서구".split(" ");
+  var DAEJEON = "대전시 유성구 대덕구 동구 서구 중구".split(" ");
+  var BUSAN = "부산시 기장군 해운대구 사하구 금정구 연제구 수영구 사상구 영도구".split(" ");
+  var ULSAN = "울산시 울주군".split(" ");
+  var GWANGJU = "광주시 광산구".split(" ");
+  var SOLO = { "강원": "강원", "충북": "충북", "전북": "전북", "제주": "제주" };
+
+  function wideArea(region, sigungu) {
+    var r = String(region || "").replace(/[\/\s]/g, "");
+    if (SOLO[r]) return SOLO[r];
+    var s = String(sigungu || "");
+    var has = function (list) { return list.indexOf(s) !== -1; };
+    if (r === "서울인천경기") {
+      return has(SEOUL_GU) ? "서울" : has(INCHEON) ? "인천" : "경기";
     }
-    var out = nextDayKey(dateKey);
-    var range = useDtLabel(dateKey) + "-" + useDtLabel(out);
-    var params = [
-      ["srchInsttId", entry.id],
-      ["srchRsrvtBgDt", dateKey],
-      ["srchRsrvtEdDt", out],
-      ["srchSthngCnt", "1"],      // 1박
-      ["srchStngNofpr", "2"],     // 기준 인원 (화면에서 변경 가능)
-      ["srchUseDt", range],
-      ["calPicker", range],
-      ["rsrvtWtngSctin", "01"],
-      ["menuId", "001001"],
-      ["hmpgId", "FRIP"]
-    ].map(function (p) { return p[0] + "=" + encodeURIComponent(p[1]); });
-    return RESERVE_BASE + "?" + params.join("&");
+    if (r === "대구경북") return has(DAEGU) ? "대구" : "경북";
+    if (r === "대전충남") return has(DAEJEON) ? "대전" : "충남";
+    if (r === "부산경남") return has(BUSAN) ? "부산" : has(ULSAN) ? "울산" : "경남";
+    if (r === "전남광주") return has(GWANGJU) ? "광주" : "전남";
+    return region || "";
   }
+
+  // "용인시"→"용인", "가평군"→"가평", "청주시 상당구"→"청주 상당구",
+  // "노원구"→"노원구"(자치구는 그대로), "대구시"→""(광역명과 겹쳐 생략)
+  function compactSigungu(s) {
+    if (!s) return "";
+    if (/^(서울|인천|부산|대구|광주|대전|울산|세종)시?$/.test(s)) return "";
+    return s.replace(/시\s+/, " ").replace(/(시|군)$/, "");
+  }
+
+  function areaLabel(region, sigungu) {
+    var wide = wideArea(region, sigungu);
+    var local = compactSigungu(sigungu);
+    return local ? (wide ? wide + " " + local : local) : wide;
+  }
+
+  // 지점별 광역시/도. 필터가 표시와 같은 단위로 걸리도록 미리 계산해 둔다
+  // (묶음 그대로 두면 "서울 노원구"를 보고도 서울만 골라낼 수 없다).
+  var FOREST_WIDE = [];
+  function buildAreaCache() {
+    FOREST_WIDE = FORESTS.map(function (f) { return wideArea(f[2], sigungu(f[0])); });
+  }
+
+  var WIDE_ORDER = ("서울 인천 경기 강원 충북 충남 대전 세종 전북 전남 광주 " +
+    "경북 대구 경남 부산 울산 제주").split(" ");
 
   // "[공립](가평군)강씨봉자연휴양림" → "강씨봉" (달력 셀 미리보기용 축약)
   function shortName(name) {
@@ -696,16 +742,19 @@
       openHtml = '<div class="open-section"><h4>🔔 이날 예약 오픈 (' + opens.length + "곳)</h4>" +
         opens.map(function (p) {
           var f = forestOfPolicy && forestOfPolicy.get(p);
-          // 오픈일은 접수 시작일이지 숙박일이 아니다 — 날짜 없이 지점 예약 화면만 연다
-          var href = f && f[1]
-            ? RESERVE_BASE + "?srchInsttId=" + encodeURIComponent(f[1]) +
-              "&menuId=001001&hmpgId=FRIP"
-            : "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do?srchWord=" +
-              encodeURIComponent(bareName(p.name));
-          var where = [p.type, (f && f[2]) || p.sigungu].filter(Boolean).join(" · ");
+          // 지점이 달력에 실려 있으면 그쪽 지역·시군구가 더 정확하고,
+          // 없으면 정책 표의 값으로 대신한다
+          var area = f
+            ? areaLabel(f[2], sigungu(f[0]))
+            : areaLabel(p.region, p.sigungu);
+          var where = [p.type, area].filter(Boolean).join(" · ");
+          // 지점 ID 를 알면 소개 페이지로 직행하고, 모르면 검색으로 폴백한다.
+          // 폴백 검색어는 띄어쓰기가 살아 있는 정책 표 원문(label)을 쓴다
+          // (name 은 공백을 지운 매칭 전용이라 검색이 0건으로 뜬다).
+          var href = forestUrl(f && f[1], p.label || p.name);
           return '<div class="open-row">' +
             '<span class="ol"><a href="' + href + '" target="_blank" rel="noopener">' +
-            esc(bareName(p.name)) + "</a>" +
+            esc(bareName(p.label || p.name)) + "</a>" +
             '<em class="otag">' + esc(where) + "</em></span>" +
             "<span>" + esc(p.rule) + "</span></div>";
         }).join("") + "</div>";
@@ -734,9 +783,9 @@
         ? '<div class="rule">예약 오픈: ' + esc(policy.rule) + "</div>"
         : "";
       return '<div class="forest"><h3>' +
-        '<a class="fname" href="' + reserveUrl(e, key) + '" target="_blank" rel="noopener"' +
-        ' title="숲나들e 예약 화면으로 이동 (1박 기준)">' + esc(e.name) + "</a>" +
-        '<span class="region">' + esc(e.region || "") + "</span>" + maps + "</h3>" +
+        '<a class="fname" href="' + forestUrl(e.id, e.name) + '" target="_blank" rel="noopener"' +
+        ' title="숲나들e 휴양림 페이지 열기 (예약은 그 화면에서)">' + esc(e.name) + "</a>" +
+        '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
     $("dlg").showModal();
@@ -846,6 +895,7 @@
       current = Math.max(0, months.indexOf(curYm));
       buildPolicyIndex();
       buildForestLinks();   // policyFor 가 준비된 뒤에 역방향 맵을 만든다
+      buildAreaCache();     // populateRegions 가 광역 목록을 쓰므로 그 앞에서
       populateRegions();
       populateTypes();
       rerender();

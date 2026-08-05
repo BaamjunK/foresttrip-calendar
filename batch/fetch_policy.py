@@ -36,6 +36,7 @@ def parse(html: str) -> list[dict]:
 
     policies: list[dict] = []
     current_type = ""
+    current_region = ""
     for row in rows:
         cells = [strip_tags(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, re.S)]
         if not cells:
@@ -62,6 +63,13 @@ def parse(html: str) -> list[dict]:
         sigungu = prev if re.search(r"(시|군|구)$", prev) else ""
         if not name or name.replace(" ", "") in ("휴양림", "운영현황"):
             continue
+        # 시·도 셀은 rowspan 으로 생략되는 행이 많다. 나타난 행에서만 갱신하고
+        # 이후 행은 직전 값을 잇는다(구분 셀과 같은 방식).
+        # 시·군·구 앞칸이 시·도이며, "서울인천경기"처럼 묶여 있다.
+        if ox_idx >= 3:
+            cand = cells[ox_idx - 3].strip()
+            if cand and cand not in TYPE_LABELS and not re.search(r"(시|군|구)$", cand):
+                current_region = cand
         # 오픈 규칙 셀: "오픈"이 들어간 셀 (예: "매월 1일 09시 오픈")
         rule = next((c for c in cells if "오픈" in c), "")
         rule = re.sub(r"^O\s+", "", rule)  # 국립 행은 운영여부 O 와 붙어 나옴
@@ -74,8 +82,13 @@ def parse(html: str) -> list[dict]:
             open_day = int(day_match.group(1))
         policies.append(
             {
+                # name 은 지점명 매칭용이라 공백을 지운다. 다만 숲나들e 통합검색은
+                # 띄어쓰기를 그대로 지켜야 찾아진다("수락산 동막골 자연휴양림" 1건 /
+                # 붙여 쓰면 0건). 표시·검색용 원본을 label 로 따로 남긴다.
                 "name": re.sub(r"\s+", "", name),
+                "label": re.sub(r"\s+", " ", name).strip(),
                 "sigungu": sigungu,
+                "region": current_region,
                 "type": current_type,
                 "rule": rule,
                 "open_day": open_day,
