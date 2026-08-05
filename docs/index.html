@@ -224,9 +224,14 @@
   .open-section h4 { font-size: .82rem; color: var(--warn-ink); margin-bottom: 4px; }
   .open-row {
     display: flex; justify-content: space-between; gap: 10px;
-    font-size: .78rem; color: var(--text-secondary); padding: 2px 0;
+    font-size: .78rem; color: var(--text-secondary); padding: 3px 0;
   }
   .open-row span:last-child { color: var(--text-muted); white-space: nowrap; }
+  .open-row .ol { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .open-row .ol a { color: var(--text-secondary); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .open-row .ol a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .open-row .ol a::after { content: " ↗"; font-size: .68rem; color: var(--text-muted); }
+  .otag { font-style: normal; font-size: .68rem; color: var(--text-muted); }
 
   footer { margin-top: 18px; font-size: .75rem; color: var(--text-muted); }
   footer a { color: inherit; }
@@ -255,16 +260,17 @@
     <select id="region" aria-label="지역 필터">
       <option value="">전체 지역</option>
     </select>
-    <select id="people" aria-label="인원 필터">
-      <option value="0">인원 전체</option>
-      <option value="2">2인 이상</option>
-      <option value="4">4인 이상</option>
-      <option value="6">6인 이상</option>
-      <option value="8">8인 이상</option>
-      <option value="10">10인 이상</option>
-      <option value="15">15인 이상</option>
-      <option value="20">20인 이상</option>
+    <select id="optype" aria-label="운영주체 필터">
+      <option value="">전체 주체</option>
     </select>
+    <span class="pricebox">
+      <input id="cmin" type="number" min="0" step="1" placeholder="최소"
+             inputmode="numeric" aria-label="최소 정원(인)">
+      <span class="tilde">~</span>
+      <input id="cmax" type="number" min="0" step="1" placeholder="최대"
+             inputmode="numeric" aria-label="최대 정원(인)">
+      <span class="unit">인</span>
+    </span>
     <span class="pricebox">
       <input id="pmin" type="number" min="0" step="1" placeholder="최소"
              inputmode="numeric" aria-label="최소 요금(만원)">
@@ -313,7 +319,9 @@
   var regionFilter = "";
   var minPrice = 0;      // 원 단위, 0 = 하한 없음
   var maxPrice = 0;      // 원 단위, 0 = 상한 없음
-  var minPeople = 0;     // 최소 수용 인원, 0 = 전체
+  var minPeople = 0;     // 수용 인원 하한, 0 = 없음
+  var maxPeople = 0;     // 수용 인원 상한, 0 = 없음
+  var typeFilter = "";   // "국립"/"공립"/"사립", "" = 전체
 
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
@@ -331,11 +339,13 @@
   }
 
   function roomFilterOn() {
-    return minPrice > 0 || maxPrice > 0 || minPeople > 0;
+    return minPrice > 0 || maxPrice > 0 || minPeople > 0 || maxPeople > 0;
   }
 
-  // 객실 단위 조건(요금 범위·수용 인원). 요금 조건이 걸리면 "가격 미확인"(0)은
-  // 판정이 불가능하므로 제외한다. 인원 조건만 걸린 경우엔 요금과 무관하게 남긴다.
+  // 객실 단위 조건(요금 범위·정원 범위). 요금 조건이 걸리면 "가격 미확인"(0)은
+  // 판정이 불가능하므로 제외한다. 정원은 객실 정원(최대 수용 인원) 기준이라
+  // "2~4인"은 정원이 그 범위에 드는 객실만 남긴다 — 하한만 걸면 대형 객실까지
+  // 전부 걸려 사실상 필터가 되지 않는다.
   function slotPasses(s) {
     var price = s[1];
     if (minPrice > 0 || maxPrice > 0) {
@@ -343,11 +353,19 @@
       if (minPrice > 0 && price < minPrice) return false;
       if (maxPrice > 0 && price > maxPrice) return false;
     }
-    if (minPeople > 0) {
+    if (minPeople > 0 || maxPeople > 0) {
       var r = ROOMS[s[0]];
-      if (!r || !r[2] || r[2] < minPeople) return false;
+      var cap = r && r[2];
+      if (!cap) return false;                        // 정원 미상은 판정 불가
+      if (minPeople > 0 && cap < minPeople) return false;
+      if (maxPeople > 0 && cap > maxPeople) return false;
     }
     return true;
+  }
+
+  // "[공립](강릉시)임해자연휴양림" → "공립"
+  function operatorType(name) {
+    return (String(name).match(/^\s*\[([^\]]*)\]/) || [])[1] || "";
   }
 
   // 필터(지역 + 요금 + 인원 + 휴양림명) 적용된 해당 날짜의 지점 목록.
@@ -363,6 +381,7 @@
       var f = FORESTS[list[i][0]];
       if (!f) continue;
       if (regionFilter && f[2] !== regionFilter) continue;
+      if (typeFilter && operatorType(f[0]) !== typeFilter) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
       var slots = list[i][1];
       if (byRoom) {
@@ -432,12 +451,35 @@
     return null;
   }
 
-  // 해당 날짜에 예약이 오픈되는 휴양림 목록 (휴양림명 필터만 적용)
+  // 정책 → 지점 역방향. 오픈 목록에서도 예약 링크·지역을 보여주려면 지점 ID 가
+  // 필요한데 정책 표에는 없다. 빈자리가 있어 달력에 실린 지점만 연결되고,
+  // 나머지(그 기간 빈자리가 없는 곳)는 링크 없이 정책 정보만 보여준다.
+  var forestOfPolicy = null;   // Map<policy, [이름, 지점ID, 지역]>
+
+  function buildForestLinks() {
+    forestOfPolicy = new Map();
+    FORESTS.forEach(function (f) {
+      var p = policyFor(f[0]);
+      if (p && !forestOfPolicy.has(p)) forestOfPolicy.set(p, f);
+    });
+  }
+
+  // 해당 날짜에 예약이 오픈되는 휴양림 목록.
+  // 달력 본체와 같은 기준(이름·지역·운영주체)으로 걸러 필터와 어긋나지 않게 한다.
+  // 요금·정원은 객실 단위 조건이라 오픈 목록에는 적용하지 않는다.
   function opensFor(dayOfMonth) {
     var list = openByDay[dayOfMonth] || [];
-    if (!filterText) return list;
-    var needle = norm(filterText);
-    return list.filter(function (p) { return p.name.indexOf(needle) !== -1; });
+    var needle = filterText ? norm(filterText) : null;
+    return list.filter(function (p) {
+      var f = forestOfPolicy && forestOfPolicy.get(p);
+      if (needle && norm(p.name).indexOf(needle) === -1 &&
+          !(f && norm(f[0]).indexOf(needle) !== -1)) return false;
+      if (typeFilter && p.type !== typeFilter) return false;
+      if (regionFilter) {
+        if (!f || f[2] !== regionFilter) return false;
+      }
+      return true;
+    });
   }
 
   function populateRegions() {
@@ -447,6 +489,22 @@
     var opts = Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, "ko"); });
     $("region").innerHTML = '<option value="">전체 지역</option>' +
       opts.map(function (r) { return "<option>" + esc(r) + "</option>"; }).join("");
+  }
+
+  function populateTypes() {
+    var seen = {};
+    FORESTS.forEach(function (f) {
+      var t = operatorType(f[0]);
+      if (t) seen[t] = 1;
+    });
+    // 국립 → 공립 → 사립 순으로 고정(가나다순이면 공립이 앞에 와 어색하다)
+    var order = ["국립", "공립", "사립"];
+    var opts = Object.keys(seen).sort(function (a, b) {
+      var ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    $("optype").innerHTML = '<option value="">전체 주체</option>' +
+      opts.map(function (t) { return "<option>" + esc(t) + "</option>"; }).join("");
   }
 
   function monthLabel(ym) {
@@ -637,7 +695,19 @@
     if (opens.length) {
       openHtml = '<div class="open-section"><h4>🔔 이날 예약 오픈 (' + opens.length + "곳)</h4>" +
         opens.map(function (p) {
-          return '<div class="open-row"><span>' + esc(p.name) + "</span><span>" + esc(p.rule) + "</span></div>";
+          var f = forestOfPolicy && forestOfPolicy.get(p);
+          // 오픈일은 접수 시작일이지 숙박일이 아니다 — 날짜 없이 지점 예약 화면만 연다
+          var href = f && f[1]
+            ? RESERVE_BASE + "?srchInsttId=" + encodeURIComponent(f[1]) +
+              "&menuId=001001&hmpgId=FRIP"
+            : "https://www.foresttrip.go.kr/pot/is/gs/selectGnrlSrchView.do?srchWord=" +
+              encodeURIComponent(bareName(p.name));
+          var where = [p.type, (f && f[2]) || p.sigungu].filter(Boolean).join(" · ");
+          return '<div class="open-row">' +
+            '<span class="ol"><a href="' + href + '" target="_blank" rel="noopener">' +
+            esc(bareName(p.name)) + "</a>" +
+            '<em class="otag">' + esc(where) + "</em></span>" +
+            "<span>" + esc(p.rule) + "</span></div>";
         }).join("") + "</div>";
     }
 
@@ -673,7 +743,8 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionFilter || minPeople || minPrice || maxPrice || filterText);
+    $("reset").hidden = !(regionFilter || typeFilter || minPeople || maxPeople ||
+      minPrice || maxPrice || filterText);
     renderTiles();
     renderTabs();
     renderGrid();
@@ -695,8 +766,8 @@
     regionFilter = this.value;
     rerender();
   });
-  $("people").addEventListener("change", function () {
-    minPeople = parseInt(this.value, 10) || 0;
+  $("optype").addEventListener("change", function () {
+    typeFilter = this.value;
     rerender();
   });
 
@@ -714,10 +785,24 @@
   $("pmin").addEventListener("input", readPrices);
   $("pmax").addEventListener("input", readPrices);
 
+  function readPeople() {
+    var lo = parseInt($("cmin").value, 10), hi = parseInt($("cmax").value, 10);
+    minPeople = lo > 0 ? lo : 0;
+    maxPeople = hi > 0 ? hi : 0;
+    if (minPeople && maxPeople && minPeople > maxPeople) {
+      var t = minPeople; minPeople = maxPeople; maxPeople = t;
+    }
+    rerender();
+  }
+  $("cmin").addEventListener("input", readPeople);
+  $("cmax").addEventListener("input", readPeople);
+
   $("reset").addEventListener("click", function () {
-    $("region").value = ""; $("people").value = "0";
+    $("region").value = ""; $("optype").value = "";
+    $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
-    regionFilter = ""; minPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
+    regionFilter = ""; typeFilter = "";
+    minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     rerender();
   });
   $("grid").addEventListener("click", function (ev) {
@@ -760,7 +845,9 @@
       var curYm = todayKey().slice(0, 6);
       current = Math.max(0, months.indexOf(curYm));
       buildPolicyIndex();
+      buildForestLinks();   // policyFor 가 준비된 뒤에 역방향 맵을 만든다
       populateRegions();
+      populateTypes();
       rerender();
     })
     .catch(function (err) {
