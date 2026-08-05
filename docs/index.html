@@ -227,6 +227,10 @@
     font-size: .78rem; color: var(--text-secondary); padding: 3px 0;
   }
   .open-row span:last-child { color: var(--text-muted); white-space: nowrap; }
+  .open-note {
+    margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border);
+    font-size: .7rem; line-height: 1.45; color: var(--text-muted);
+  }
   .open-row .ol { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
   .open-row .ol a { color: var(--text-secondary); text-decoration: none; border-bottom: 1px solid var(--border); }
   .open-row .ol a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
@@ -746,7 +750,12 @@
 
     var openHtml = "";
     if (opens.length) {
-      openHtml = '<div class="open-section"><h4>🔔 이날 예약 오픈 (' + opens.length + "곳)</h4>" +
+      // 정책 표에 공고된 정기 오픈일을 그대로 비춘 것이다. 그 표는 어느 달
+      // 이용분인지, 선착순인지 추첨인지, 이번 회차가 이미 마감됐는지를 알려주지
+      // 않는다(표의 선착순·추첨 칸도 실제와 어긋난다 — 추첨 칸에 적힌 강씨봉·
+      // 석모도는 실제로는 선착순이고, 선착순 칸의 유명산은 추첨도 병행한다).
+      // 그래서 단정하지 않고, 지점 페이지에서 확인하도록 안내만 덧붙인다.
+      openHtml = '<div class="open-section"><h4>🔔 이날 정기 예약 오픈 (' + opens.length + "곳)</h4>" +
         opens.map(function (p) {
           var f = forestOfPolicy && forestOfPolicy.get(p);
           // 지점이 달력에 실려 있으면 그쪽 지역·시군구가 더 정확하고,
@@ -764,7 +773,10 @@
             esc(bareName(p.label || p.name)) + "</a>" +
             '<em class="otag">' + esc(where) + "</em></span>" +
             "<span>" + esc(p.rule) + "</span></div>";
-        }).join("") + "</div>";
+        }).join("") +
+        '<p class="open-note">휴양림이 공고한 정기 오픈일입니다. 어느 달 이용분인지, ' +
+        '선착순인지 추첨인지, 이번 회차가 이미 마감됐는지는 각 휴양림 페이지에서 ' +
+        '확인하세요.</p></div>';
     }
 
     $("dlg-body").innerHTML = openHtml + es.map(function (e) {
