@@ -332,6 +332,10 @@
       <summary aria-label="운영주체 필터">전체 주체</summary>
       <div class="multi-panel" id="typeopts"></div>
     </details>
+    <details class="multi" id="kindbox">
+      <summary aria-label="시설 구분 필터">전체 시설</summary>
+      <div class="multi-panel" id="kindopts"></div>
+    </details>
     <span class="pricebox">
       <input id="cmin" type="number" min="0" step="1" placeholder="최소"
              inputmode="numeric" aria-label="최소 정원(인)">
@@ -393,9 +397,12 @@
   var maxPrice = 0;      // 원 단위, 0 = 상한 없음
   var minPeople = 0;     // 수용 인원 하한, 0 = 없음
   var maxPeople = 0;     // 수용 인원 상한, 0 = 없음
-  // 지역·운영주체는 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
+  // 지역·운영주체·시설 구분은 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
   var regionSel = [];
   var typeSel = [];
+  var kindSel = [];      // 시설 구분 라벨("독채"…)
+  // rooms[].4 의 시설 구분 코드 ↔ 라벨
+  var KIND_LABELS = ["독채", "동형", "캠핑", "기타"];
   var favorites = {};    // 지점ID -> true (관심 휴양림)
   var favOnly = false;   // 관심 휴양림만 보기
 
@@ -409,7 +416,7 @@
   // 저장·URL 공유가 같은 형태를 쓰도록 상태를 한 곳에서 만든다
   function currentState() {
     return {
-      region: regionSel, type: typeSel, text: filterText,
+      region: regionSel, type: typeSel, kind: kindSel, text: filterText,
       cmin: minPeople, cmax: maxPeople,
       pmin: minPrice, pmax: maxPrice, favOnly: favOnly
     };
@@ -420,6 +427,7 @@
     // 이전 버전은 문자열 하나만 저장했다 — 배열로 받아 준다
     regionSel = [].concat(s.region || []).filter(Boolean);
     typeSel = [].concat(s.type || []).filter(Boolean);
+    kindSel = [].concat(s.kind || []).filter(Boolean);
     filterText = s.text || "";
     minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
     minPrice = s.pmin || 0; maxPrice = s.pmax || 0;
@@ -450,6 +458,7 @@
     var put = function (k, v) { if (v) q.push(k + "=" + encodeURIComponent(v)); };
     put("r", regionSel.join(","));
     put("t", typeSel.join(","));
+    put("k", kindSel.join(","));
     put("q", filterText);
     put("cmin", minPeople || "");
     put("cmax", maxPeople || "");
@@ -469,12 +478,12 @@
       var i = pair.indexOf("=");
       if (i > 0) p[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
     });
-    var known = ["r", "t", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
+    var known = ["r", "t", "k", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
     if (!known.some(function (k) { return k in p; })) return false;
     var list = function (v) { return v ? v.split(",").filter(Boolean) : []; };
     var num = function (v) { var n = parseFloat(v); return n > 0 ? n : 0; };
     applyState({
-      region: list(p.r), type: list(p.t), text: p.q || "",
+      region: list(p.r), type: list(p.t), kind: list(p.k), text: p.q || "",
       cmin: num(p.cmin), cmax: num(p.cmax),
       pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
       favOnly: p.favonly === "1"
@@ -522,7 +531,7 @@
   }
 
   function roomFilterOn() {
-    return minPrice > 0 || maxPrice > 0 || minPeople > 0 || maxPeople > 0;
+    return minPrice > 0 || maxPrice > 0 || minPeople > 0 || maxPeople > 0 || kindSel.length > 0;
   }
 
   // 객실 단위 조건(요금 범위·정원 범위). 요금 조건이 걸리면 "가격 미확인"(0)은
@@ -542,6 +551,10 @@
       if (!cap) return false;                        // 정원 미상은 판정 불가
       if (minPeople > 0 && cap < minPeople) return false;
       if (maxPeople > 0 && cap > maxPeople) return false;
+    }
+    if (kindSel.length) {
+      var rk = ROOMS[s[0]];
+      if (!rk || kindSel.indexOf(KIND_LABELS[rk[4]]) === -1) return false;
     }
     return true;
   }
@@ -580,12 +593,13 @@
   // 팝업에 뿌릴 객실 목록으로 풀어낸다 (요금 0 = 미확인 → null)
   function hydrateRooms(slots) {
     return slots.map(function (s) {
-      var r = ROOMS[s[0]] || ["", 0, 0, 0];
+      var r = ROOMS[s[0]] || ["", 0, 0, 0, 3];
       return {
         name: r[0],
         category: CATEGORIES[r[1]] || "",
         capacity: r[2] || null,
         area: r[3] || null,
+        kind: KIND_LABELS[r[4]] || "",
         price: s[1] > 0 ? s[1] : null
       };
     });
@@ -693,7 +707,7 @@
     }
   }
 
-  var regionOptions = [], typeOptions = [];
+  var regionOptions = [], typeOptions = [], kindOptions = [];
 
   function populateRegions() {
     // 지점 마스터에는 빈자리가 있는 지점만 담겨 있어 그대로 지역 목록이 된다
@@ -719,16 +733,25 @@
     });
   }
 
+  function populateKinds() {
+    // 실제로 등장하는 구분만 노출한다(캠핑 미조회 시 캠핑 항목이 뜨지 않도록)
+    var seen = {};
+    ROOMS.forEach(function (r) { seen[KIND_LABELS[r[4]] || "기타"] = 1; });
+    kindOptions = KIND_LABELS.filter(function (k) { return seen[k]; });
+  }
+
   // 저장·공유로 받은 값 중 이번 데이터에 없는 것은 조용히 버린다(지점 구성이
   // 매일 바뀌므로 남겨 두면 결과가 0건이 되어 버린다)
   function pruneSelections() {
     regionSel = regionSel.filter(function (v) { return regionOptions.indexOf(v) !== -1; });
     typeSel = typeSel.filter(function (v) { return typeOptions.indexOf(v) !== -1; });
+    kindSel = kindSel.filter(function (v) { return kindOptions.indexOf(v) !== -1; });
   }
 
   function renderFilterMenus() {
     renderMulti("regionbox", "regionopts", regionOptions, regionSel, "전체 지역");
     renderMulti("typebox", "typeopts", typeOptions, typeSel, "전체 주체");
+    renderMulti("kindbox", "kindopts", kindOptions, kindSel, "전체 시설");
   }
 
   function monthLabel(ym) {
@@ -993,7 +1016,11 @@
     $("dlg-body").innerHTML = openHtml + es.map(function (e) {
       var rooms = hydrateRooms(e.slots).map(function (r) {
         var meta = [];
+        // 유형명이 곧 구분을 말해 주면(숲속의집=독채) 굳이 덧붙이지 않는다
         if (r.category) meta.push(r.category);
+        if (r.kind === "캠핑" || r.kind === "독채") {
+          if (norm(r.category).indexOf(r.kind) === -1) meta.push(r.kind);
+        }
         if (r.capacity != null) meta.push("최대 " + r.capacity + "인");
         if (r.area != null) meta.push(r.area + "㎡");
         var price = r.price != null
@@ -1032,7 +1059,7 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionSel.length || typeSel.length || minPeople || maxPeople ||
+    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || minPeople || maxPeople ||
       minPrice || maxPrice || filterText || favOnly);
     renderFilterMenus();
     renderFavToggle();
@@ -1080,6 +1107,8 @@
     function () { return regionSel; }, function (v) { regionSel = v; }, "전체 지역");
   bindMulti("typebox", "typeopts",
     function () { return typeSel; }, function (v) { typeSel = v; }, "전체 주체");
+  bindMulti("kindbox", "kindopts",
+    function () { return kindSel; }, function (v) { kindSel = v; }, "전체 시설");
 
   // 패널 밖을 누르면 닫는다
   document.addEventListener("click", function (ev) {
@@ -1148,7 +1177,7 @@
   $("reset").addEventListener("click", function () {
     $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
-    regionSel = []; typeSel = [];
+    regionSel = []; typeSel = []; kindSel = [];
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
@@ -1205,7 +1234,7 @@
       return r.json();
     })
     .then(function (json) {
-      if (json.v !== 2) {
+      if (json.v !== 3) {
         throw new Error("데이터 형식(v" + (json.v || 1) + ")이 이 페이지와 맞지 않습니다");
       }
       DATA = json;
@@ -1236,6 +1265,7 @@
       buildAreaCache();     // populateRegions 가 광역 목록을 쓰므로 그 앞에서
       populateRegions();
       populateTypes();
+      populateKinds();
       // 주소에 조건이 실려 있으면 그쪽이 우선(공유 링크), 없으면 저장값을 복원
       if (!readQuery()) loadState();
       pruneSelections();
