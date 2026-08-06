@@ -23,7 +23,8 @@ raw 구조 (vendor/run_foresttrip_vacancy.py --json 출력):
     "policies": [{"name": "...", "sigungu": "...", "type": "공립", "rule": "...", "open_day": 1}],
     "categories": ["숲속의집", "연립동", ...],
     "forests":  [["[공립](강릉시)임해자연휴양림", "ID02030100", "강원"], ...],
-    "rooms":    [["하늘동 201호", 1, 5, 36], ...],   # 이름, 유형 idx, 정원, 면적(㎡)
+    "rooms":    [["하늘동 201호", 1, 5, 36, 1], ...],  # 이름, 유형 idx, 정원, 면적(㎡), 시설구분
+                                                      # 시설구분 0=독채 1=동형 2=캠핑 3=기타
     "days": {
       "20260804": [[3, [[128, 130000], [129, 0]]], ...]   # 지점 idx, [[객실 idx, 요금]]
     }
@@ -40,7 +41,30 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# 시설 구분: 0=독채, 1=동형(여러 세대가 한 건물), 2=캠핑, 3=기타
+KIND_DETACHED, KIND_BLOCK, KIND_CAMP, KIND_ETC = 0, 1, 2, 3
+
+# 캠핑은 조회 카테고리(02)로 확실히 갈리지만, 숙박은 유형명으로 추론할 수밖에
+# 없다. 숲나들e 의 유형칸에는 "가족·단체" 같은 이용대상이나 시설명이 그대로
+# 들어오기도 해서, 확신이 서는 이름만 분류하고 나머지는 기타로 남긴다.
+DETACHED_RE = re.compile(
+    r"(집|하우스|house|통나무|트리|카라반|글램핑|이동식|독채|펜션|방갈로|코티지"
+    r"|산막|산장|가옥|주택)", re.I
+)
+BLOCK_RE = re.compile(r"(관|동|빌라|아파트|층|호텔|리조트|타운|마을|촌|수련원|수련장|센터|원룸)")
+
+
+def room_kind(category_name: str, source_category: str) -> int:
+    if source_category == "02":
+        return KIND_CAMP
+    name = (category_name or "").replace(" ", "")
+    if DETACHED_RE.search(name):
+        return KIND_DETACHED
+    if BLOCK_RE.search(name):
+        return KIND_BLOCK
+    return KIND_ETC
 
 
 def parse_area(value) -> int:
@@ -88,15 +112,17 @@ def transform(
         return forest_idx[key]
 
     def intern_room(room: dict) -> int:
+        kind = room_kind(room.get("category") or "", room.get("source_category") or "01")
         key = (
             room.get("name") or "",
             room.get("category") or "",
             parse_int(room.get("capacity")),
             parse_area(room.get("area")),
+            kind,
         )
         if key not in room_idx:
             room_idx[key] = len(rooms)
-            rooms.append([key[0], intern_category(key[1]), key[2], key[3]])
+            rooms.append([key[0], intern_category(key[1]), key[2], key[3], kind])
         return room_idx[key]
 
     for forest_entry in raw.get("results", []):

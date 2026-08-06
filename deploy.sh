@@ -78,7 +78,7 @@ log "조회 범위: ${DATES%%,*} ~ ${DATES##*,}"
 mkdir -p data
 run_fetch() {
   "$PYTHON" vendor/run_foresttrip_vacancy.py \
-    --all --json --categories 01 --concurrency 3 --dates "$DATES" "$@" > data/raw.json
+    --all --json --categories 01,02 --concurrency 3 --dates "$DATES" "$@" > data/raw.json
 }
 
 log "=== 숲나들e 조회 시작 ==="
