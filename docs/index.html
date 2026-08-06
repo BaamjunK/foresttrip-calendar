@@ -125,6 +125,23 @@
     font-size: .85rem; cursor: pointer;
   }
   #reset:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .pill {
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary);
+    font-size: .85rem; cursor: pointer; white-space: nowrap;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .pill[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 700;
+  }
+  /* 상세 팝업의 관심 등록 별 */
+  .fav {
+    border: none; background: none; cursor: pointer; padding: 0 2px;
+    font-size: .95rem; line-height: 1; color: var(--text-muted);
+  }
+  .fav:hover { color: var(--warn-ink); }
+  .fav[aria-pressed="true"] { color: #eda100; }
   .tabs { display: flex; gap: 6px; }
   .tabs button {
     padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
@@ -294,6 +311,7 @@
       <span class="unit">만원</span>
     </span>
     <input id="filter" type="search" placeholder="휴양림명" autocomplete="off">
+    <button id="favonly" type="button" class="pill" hidden aria-pressed="false"></button>
     <button id="reset" type="button" hidden>필터 초기화</button>
   </div>
 
@@ -338,6 +356,64 @@
   var minPeople = 0;     // 수용 인원 하한, 0 = 없음
   var maxPeople = 0;     // 수용 인원 상한, 0 = 없음
   var typeFilter = "";   // "국립"/"공립"/"사립", "" = 전체
+  var favorites = {};    // 지점ID -> true (관심 휴양림)
+  var favOnly = false;   // 관심 휴양림만 보기
+
+  // 필터 조건과 관심 목록은 브라우저에 남겨 다음에 열 때 그대로 복원한다.
+  // 관심 목록은 이름이 바뀌어도 견디도록 지점 ID 로 저장한다.
+  var STORE_FILTERS = "foresttrip-calendar.filters";
+  var STORE_FAVS = "foresttrip-calendar.favorites";
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORE_FILTERS, JSON.stringify({
+        region: regionFilter, type: typeFilter, text: filterText,
+        cmin: minPeople, cmax: maxPeople,
+        pmin: minPrice, pmax: maxPrice, favOnly: favOnly
+      }));
+      localStorage.setItem(STORE_FAVS, JSON.stringify(Object.keys(favorites)));
+    } catch (e) { /* 시크릿 모드 등 저장 불가 — 기능은 그대로 동작 */ }
+  }
+
+  function loadState() {
+    try {
+      (JSON.parse(localStorage.getItem(STORE_FAVS)) || []).forEach(function (id) {
+        favorites[id] = true;
+      });
+      var s = JSON.parse(localStorage.getItem(STORE_FILTERS)) || {};
+      regionFilter = s.region || "";
+      typeFilter = s.type || "";
+      filterText = s.text || "";
+      minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
+      minPrice = s.pmin || 0; maxPrice = s.pmax || 0;
+      favOnly = !!s.favOnly;
+    } catch (e) { /* 저장값이 깨졌으면 기본값으로 시작 */ }
+  }
+
+  // 복원한 값을 입력 요소에 반영 (요금은 만원 단위로 되돌린다)
+  function applyStateToControls() {
+    $("region").value = regionFilter;
+    $("optype").value = typeFilter;
+    $("filter").value = filterText;
+    $("cmin").value = minPeople || "";
+    $("cmax").value = maxPeople || "";
+    $("pmin").value = minPrice ? minPrice / 10000 : "";
+    $("pmax").value = maxPrice ? maxPrice / 10000 : "";
+    // 저장된 지역·주체가 이번 데이터에 없으면(지점 변동) 조용히 전체로 되돌린다
+    if ($("region").value !== regionFilter) regionFilter = $("region").value;
+    if ($("optype").value !== typeFilter) typeFilter = $("optype").value;
+  }
+
+  function favCount() { return Object.keys(favorites).length; }
+
+  function renderFavToggle() {
+    var n = favCount();
+    var btn = $("favonly");
+    btn.hidden = n === 0;
+    if (n === 0) { favOnly = false; return; }
+    btn.textContent = "⭐ 관심 " + n + "곳만";
+    btn.setAttribute("aria-pressed", favOnly ? "true" : "false");
+  }
 
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
@@ -396,6 +472,7 @@
     for (var i = 0; i < list.length; i++) {
       var f = FORESTS[list[i][0]];
       if (!f) continue;
+      if (favOnly && !favorites[f[1]]) continue;
       if (regionFilter && FOREST_WIDE[list[i][0]] !== regionFilter) continue;
       if (typeFilter && operatorType(f[0]) !== typeFilter) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
@@ -494,6 +571,7 @@
     var needle = filterText ? norm(filterText) : null;
     return list.filter(function (p) {
       var f = forestOfPolicy && forestOfPolicy.get(p);
+      if (favOnly && !(f && favorites[f[1]])) return false;
       if (needle && norm(p.name).indexOf(needle) === -1 &&
           !(f && norm(f[0]).indexOf(needle) !== -1)) return false;
       if (typeFilter && p.type !== typeFilter) return false;
@@ -815,7 +893,14 @@
       var ruleLine = policy && policy.rule
         ? '<div class="rule">예약 오픈: ' + esc(policy.rule) + "</div>"
         : "";
-      return '<div class="forest"><h3>' +
+      var starred = !!favorites[e.id];
+      var star = e.id
+        ? '<button class="fav" type="button" data-fav="' + esc(e.id) + '"' +
+          ' aria-pressed="' + (starred ? "true" : "false") + '"' +
+          ' title="' + (starred ? "관심 해제" : "관심 휴양림으로 등록") + '">' +
+          (starred ? "★" : "☆") + "</button>"
+        : "";
+      return '<div class="forest"><h3>' + star +
         '<a class="fname" href="' + forestUrl(e.id, e.name) + '" target="_blank" rel="noopener"' +
         ' title="숲나들e 휴양림 페이지 열기 (예약은 그 화면에서)">' + esc(e.name) + "</a>" +
         '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
@@ -829,10 +914,12 @@
 
   function rerender() {
     $("reset").hidden = !(regionFilter || typeFilter || minPeople || maxPeople ||
-      minPrice || maxPrice || filterText);
+      minPrice || maxPrice || filterText || favOnly);
+    renderFavToggle();
     renderTiles();
     renderTabs();
     renderGrid();
+    saveState();
   }
 
   // ── 이벤트 ──────────────────────────────────────────────
@@ -854,6 +941,25 @@
   $("optype").addEventListener("change", function () {
     typeFilter = this.value;
     rerender();
+  });
+  $("favonly").addEventListener("click", function () {
+    favOnly = !favOnly;
+    rerender();
+  });
+  // 상세 팝업의 ★ — 목록을 다시 그리지 않고 그 버튼만 바꿔 스크롤 위치를 지킨다
+  $("dlg-body").addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".fav");
+    if (!btn) return;
+    var id = btn.dataset.fav;
+    if (favorites[id]) delete favorites[id]; else favorites[id] = true;
+    var on = !!favorites[id];
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.textContent = on ? "★" : "☆";
+    btn.title = on ? "관심 해제" : "관심 휴양림으로 등록";
+    renderFavToggle();
+    renderTiles();
+    renderGrid();
+    saveState();
   });
 
   // 요금 입력은 만원 단위 — 사람이 쓰는 단위로 받고 내부에서는 원으로 다룬다
@@ -888,6 +994,7 @@
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
     regionFilter = ""; typeFilter = "";
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
+    favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
   });
   $("grid").addEventListener("click", function (ev) {
@@ -937,6 +1044,9 @@
       buildAreaCache();     // populateRegions 가 광역 목록을 쓰므로 그 앞에서
       populateRegions();
       populateTypes();
+      // 저장된 조건은 옵션이 채워진 뒤에 넣어야 select 에 반영된다
+      loadState();
+      applyStateToControls();
       rerender();
     })
     .catch(function (err) {
