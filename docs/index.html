@@ -916,7 +916,9 @@
             (on ? "★" : "☆") + "</button>" +
             '<a href="' + forestUrl(r.id, r.name) + '" target="_blank" rel="noopener">' +
             esc(bareName(r.name)) + "</a>" +
-            '<span class="fl-meta">' + esc(areaLabel(r.region, sigungu(r.name))) +
+            '<span class="fl-meta">' +
+            esc([operatorType(r.name), areaLabel(r.region, sigungu(r.name))]
+              .filter(Boolean).join(" · ")) +
             (r.open ? "" : ' · <em>빈자리 없음</em>') + "</span></div>";
         }).join("");
   }
