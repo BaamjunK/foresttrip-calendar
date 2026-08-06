@@ -171,6 +171,35 @@
     background: var(--accent); border-color: var(--accent);
     color: #fff; font-weight: 700;
   }
+  .tile-btn {
+    text-align: left; font: inherit; cursor: pointer;
+    display: block; width: 100%;
+  }
+  .tile-btn:hover { border-color: var(--accent); }
+  .tile .tip { font-size: .7rem; color: var(--text-muted); font-weight: 400; }
+
+  /* 전체 휴양림 목록 */
+  .fl-tools {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px 0; flex: 0 0 auto;
+  }
+  .fl-tools input {
+    flex: 1 1 auto; padding: 7px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); font-size: .85rem;
+  }
+  .fl-count { font-size: .75rem; color: var(--text-muted); white-space: nowrap; }
+  .fl-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid var(--border); font-size: .85rem;
+  }
+  .fl-row:last-child { border-bottom: none; }
+  .fl-row a { color: var(--text-primary); text-decoration: none; border-bottom: 1px solid var(--border); }
+  .fl-row a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .fl-row.off a { color: var(--text-muted); }
+  .fl-meta { margin-left: auto; font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
+  .fl-meta em { font-style: normal; color: var(--warn-ink); }
+
   /* 상세 팝업의 관심 등록 별 */
   .fav {
     border: none; background: none; cursor: pointer; padding: 0 2px;
@@ -332,6 +361,10 @@
       <summary aria-label="운영주체 필터">전체 주체</summary>
       <div class="multi-panel" id="typeopts"></div>
     </details>
+    <details class="multi" id="staybox">
+      <summary aria-label="숙박·캠핑 필터">숙박+캠핑</summary>
+      <div class="multi-panel" id="stayopts"></div>
+    </details>
     <details class="multi" id="kindbox">
       <summary aria-label="시설 구분 필터">전체 시설</summary>
       <div class="multi-panel" id="kindopts"></div>
@@ -370,6 +403,18 @@
   </footer>
 </div>
 
+<dialog id="fldlg">
+  <div class="dlg-head">
+    <h2>전체 휴양림</h2>
+    <button id="fl-close" aria-label="닫기">✕</button>
+  </div>
+  <div class="fl-tools">
+    <input id="fl-search" type="search" placeholder="휴양림명 검색" autocomplete="off">
+    <span id="fl-count" class="fl-count"></span>
+  </div>
+  <div class="dlg-body" id="fl-rows"></div>
+</dialog>
+
 <dialog id="dlg">
   <div class="dlg-head">
     <h2 id="dlg-title"></h2>
@@ -400,9 +445,14 @@
   // 지역·운영주체·시설 구분은 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
   var regionSel = [];
   var typeSel = [];
-  var kindSel = [];      // 시설 구분 라벨("독채"…)
+  var staySel = [];      // "숙박" / "캠핑" (대분류)
+  var kindSel = [];      // 숙박 세부 구분 라벨("독채"…)
   // rooms[].4 의 시설 구분 코드 ↔ 라벨
   var KIND_LABELS = ["독채", "동형", "캠핑", "기타"];
+  var KIND_CAMP = 2;
+  var STAY_OPTIONS = ["숙박", "캠핑"];
+  // 숙박 세부는 캠핑을 뺀 나머지 — 캠핑은 대분류에서 고른다
+  var KIND_OPTIONS_ALL = ["독채", "동형", "기타"];
   var favorites = {};    // 지점ID -> true (관심 휴양림)
   var favOnly = false;   // 관심 휴양림만 보기
 
@@ -416,7 +466,7 @@
   // 저장·URL 공유가 같은 형태를 쓰도록 상태를 한 곳에서 만든다
   function currentState() {
     return {
-      region: regionSel, type: typeSel, kind: kindSel, text: filterText,
+      region: regionSel, type: typeSel, stay: staySel, kind: kindSel, text: filterText,
       cmin: minPeople, cmax: maxPeople,
       pmin: minPrice, pmax: maxPrice, favOnly: favOnly
     };
@@ -427,6 +477,7 @@
     // 이전 버전은 문자열 하나만 저장했다 — 배열로 받아 준다
     regionSel = [].concat(s.region || []).filter(Boolean);
     typeSel = [].concat(s.type || []).filter(Boolean);
+    staySel = [].concat(s.stay || []).filter(Boolean);
     kindSel = [].concat(s.kind || []).filter(Boolean);
     filterText = s.text || "";
     minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
@@ -458,6 +509,7 @@
     var put = function (k, v) { if (v) q.push(k + "=" + encodeURIComponent(v)); };
     put("r", regionSel.join(","));
     put("t", typeSel.join(","));
+    put("s", staySel.join(","));
     put("k", kindSel.join(","));
     put("q", filterText);
     put("cmin", minPeople || "");
@@ -478,12 +530,12 @@
       var i = pair.indexOf("=");
       if (i > 0) p[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
     });
-    var known = ["r", "t", "k", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
+    var known = ["r", "t", "s", "k", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
     if (!known.some(function (k) { return k in p; })) return false;
     var list = function (v) { return v ? v.split(",").filter(Boolean) : []; };
     var num = function (v) { var n = parseFloat(v); return n > 0 ? n : 0; };
     applyState({
-      region: list(p.r), type: list(p.t), kind: list(p.k), text: p.q || "",
+      region: list(p.r), type: list(p.t), stay: list(p.s), kind: list(p.k), text: p.q || "",
       cmin: num(p.cmin), cmax: num(p.cmax),
       pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
       favOnly: p.favonly === "1"
@@ -531,7 +583,7 @@
   }
 
   function roomFilterOn() {
-    return minPrice > 0 || maxPrice > 0 || minPeople > 0 || maxPeople > 0 || kindSel.length > 0;
+    return minPrice > 0 || maxPrice > 0 || minPeople > 0 || maxPeople > 0 || kindSel.length > 0 || staySel.length > 0;
   }
 
   // 객실 단위 조건(요금 범위·정원 범위). 요금 조건이 걸리면 "가격 미확인"(0)은
@@ -552,9 +604,18 @@
       if (minPeople > 0 && cap < minPeople) return false;
       if (maxPeople > 0 && cap > maxPeople) return false;
     }
-    if (kindSel.length) {
+    if (staySel.length || kindSel.length) {
       var rk = ROOMS[s[0]];
-      if (!rk || kindSel.indexOf(KIND_LABELS[rk[4]]) === -1) return false;
+      if (!rk) return false;
+      var isCamp = rk[4] === KIND_CAMP;
+      if (staySel.length && staySel.indexOf(isCamp ? "캠핑" : "숙박") === -1) return false;
+      if (kindSel.length) {
+        // 세부 구분은 숙박에만 있는 개념이다. 세부만 고른 경우("독채")는 숙박을
+        // 지정한 뜻으로 보고 캠핑을 뺀다 — 대분류에서 캠핑을 함께 고르면 남긴다.
+        if (isCamp) {
+          if (staySel.indexOf("캠핑") === -1) return false;
+        } else if (kindSel.indexOf(KIND_LABELS[rk[4]]) === -1) return false;
+      }
     }
     return true;
   }
@@ -707,7 +768,7 @@
     }
   }
 
-  var regionOptions = [], typeOptions = [], kindOptions = [];
+  var regionOptions = [], typeOptions = [], kindOptions = [], stayOptions = [];
 
   function populateRegions() {
     // 지점 마스터에는 빈자리가 있는 지점만 담겨 있어 그대로 지역 목록이 된다
@@ -737,7 +798,11 @@
     // 실제로 등장하는 구분만 노출한다(캠핑 미조회 시 캠핑 항목이 뜨지 않도록)
     var seen = {};
     ROOMS.forEach(function (r) { seen[KIND_LABELS[r[4]] || "기타"] = 1; });
-    kindOptions = KIND_LABELS.filter(function (k) { return seen[k]; });
+    kindOptions = KIND_OPTIONS_ALL.filter(function (k) { return seen[k]; });
+    stayOptions = STAY_OPTIONS.filter(function (k) {
+      return k === "캠핑" ? seen["캠핑"]
+        : (seen["독채"] || seen["동형"] || seen["기타"]);
+    });
   }
 
   // 저장·공유로 받은 값 중 이번 데이터에 없는 것은 조용히 버린다(지점 구성이
@@ -745,12 +810,14 @@
   function pruneSelections() {
     regionSel = regionSel.filter(function (v) { return regionOptions.indexOf(v) !== -1; });
     typeSel = typeSel.filter(function (v) { return typeOptions.indexOf(v) !== -1; });
+    staySel = staySel.filter(function (v) { return stayOptions.indexOf(v) !== -1; });
     kindSel = kindSel.filter(function (v) { return kindOptions.indexOf(v) !== -1; });
   }
 
   function renderFilterMenus() {
     renderMulti("regionbox", "regionopts", regionOptions, regionSel, "전체 지역");
     renderMulti("typebox", "typeopts", typeOptions, typeSel, "전체 주체");
+    renderMulti("staybox", "stayopts", stayOptions, staySel, "숙박+캠핑");
     renderMulti("kindbox", "kindopts", kindOptions, kindSel, "전체 시설");
   }
 
@@ -781,7 +848,7 @@
     });
     var html =
       tile("조건에 맞는 날", availDays, "일") +
-      tile("휴양림", Object.keys(forestSet).length, "곳") +
+      tile("휴양림", Object.keys(forestSet).length, "곳", "forestlist") +
       tile("객실", roomCount.toLocaleString("ko-KR"), "건");
     if (DATA.fetch_failures > 0) {
       html += tile("조회 실패", DATA.fetch_failures, "건");
@@ -803,9 +870,52 @@
     $("banners").innerHTML = banners;
   }
 
-  function tile(k, v, unit) {
-    return '<div class="tile"><div class="k">' + k + '</div><div class="v">' +
-      (v == null ? "?" : v) + " <small>" + unit + "</small></div></div>";
+  function tile(k, v, unit, openId) {
+    // openId 가 있으면 눌러서 목록을 여는 타일이 된다
+    var body = '<div class="k">' + k + (openId ? ' <span class="tip">목록 ⌄</span>' : "") +
+      '</div><div class="v">' + (v == null ? "?" : v) + " <small>" + unit + "</small></div>";
+    return openId
+      ? '<button type="button" class="tile tile-btn" id="' + openId + '">' + body + "</button>"
+      : '<div class="tile">' + body + "</div>";
+  }
+
+  // ── 전체 휴양림 목록 ──────────────────────────────────────
+  // 달력에는 그 기간 빈자리가 있는 곳만 나온다. 빈자리가 없는 휴양림은 이름을
+  // 검색해도 안 잡히므로, 전 지점(디렉터리)을 여기서 훑어보고 관심 등록까지
+  // 할 수 있게 한다.
+  function forestListRows(query) {
+    var avail = {};   // 현재 조건으로 빈자리가 있는 지점ID
+    Object.keys(DATA.days || {}).forEach(function (k) {
+      entriesFor(k).forEach(function (e) { if (e.id) avail[e.id] = 1; });
+    });
+    var needle = query ? norm(query) : null;
+    var source = DIRECTORY.length ? DIRECTORY : FORESTS;
+    return source.filter(function (f) {
+      return !needle || norm(f[0]).indexOf(needle) !== -1;
+    }).map(function (f) {
+      return { name: f[0], id: f[1], region: f[2], open: !!avail[f[1]] };
+    });
+  }
+
+  function renderForestList() {
+    var q = $("fl-search").value.trim();
+    var rows = forestListRows(q);
+    var open = rows.filter(function (r) { return r.open; }).length;
+    $("fl-count").textContent = rows.length + "곳 중 빈자리 " + open + "곳";
+    $("fl-rows").innerHTML = rows.length === 0
+      ? '<p class="empty-note">이름이 맞는 휴양림이 없습니다.</p>'
+      : rows.map(function (r) {
+          var on = !!favorites[r.id];
+          return '<div class="fl-row' + (r.open ? "" : " off") + '">' +
+            '<button class="fav" type="button" data-fav="' + esc(r.id) + '"' +
+            ' aria-pressed="' + (on ? "true" : "false") + '"' +
+            ' title="' + (on ? "관심 해제" : "관심 휴양림으로 등록") + '">' +
+            (on ? "★" : "☆") + "</button>" +
+            '<a href="' + forestUrl(r.id, r.name) + '" target="_blank" rel="noopener">' +
+            esc(bareName(r.name)) + "</a>" +
+            '<span class="fl-meta">' + esc(areaLabel(r.region, sigungu(r.name))) +
+            (r.open ? "" : ' · <em>빈자리 없음</em>') + "</span></div>";
+        }).join("");
   }
 
   function fmtDate(yyyymmdd) {
@@ -1059,7 +1169,7 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || minPeople || maxPeople ||
+    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || staySel.length || minPeople || maxPeople ||
       minPrice || maxPrice || filterText || favOnly);
     renderFilterMenus();
     renderFavToggle();
@@ -1107,6 +1217,8 @@
     function () { return regionSel; }, function (v) { regionSel = v; }, "전체 지역");
   bindMulti("typebox", "typeopts",
     function () { return typeSel; }, function (v) { typeSel = v; }, "전체 주체");
+  bindMulti("staybox", "stayopts",
+    function () { return staySel; }, function (v) { staySel = v; }, "숙박+캠핑");
   bindMulti("kindbox", "kindopts",
     function () { return kindSel; }, function (v) { kindSel = v; }, "전체 시설");
 
@@ -1131,6 +1243,35 @@
   $("favonly").addEventListener("click", function () {
     favOnly = !favOnly;
     rerender();
+  });
+
+  // ── 전체 휴양림 목록 ─────────────────────────────────────
+  $("tiles").addEventListener("click", function (ev) {
+    if (!ev.target.closest("#forestlist")) return;
+    $("fl-search").value = "";
+    renderForestList();
+    $("fl-rows").scrollTop = 0;
+    $("fldlg").showModal();
+  });
+  $("fl-search").addEventListener("input", renderForestList);
+  $("fl-close").addEventListener("click", function () { $("fldlg").close(); });
+  $("fldlg").addEventListener("click", function (ev) {
+    if (ev.target === this) this.close();
+  });
+  // 목록에서 별을 누르면 그 줄만 갱신하고, 뒤의 달력·타일도 함께 맞춘다
+  $("fl-rows").addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".fav");
+    if (!btn) return;
+    var id = btn.dataset.fav;
+    if (favorites[id]) delete favorites[id]; else favorites[id] = true;
+    var on = !!favorites[id];
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.textContent = on ? "★" : "☆";
+    btn.title = on ? "관심 해제" : "관심 휴양림으로 등록";
+    renderFavToggle();
+    renderTiles();
+    renderGrid();
+    saveState();
   });
   // 상세 팝업의 ★ — 목록을 다시 그리지 않고 그 버튼만 바꿔 스크롤 위치를 지킨다
   $("dlg-body").addEventListener("click", function (ev) {
@@ -1177,7 +1318,7 @@
   $("reset").addEventListener("click", function () {
     $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
-    regionSel = []; typeSel = []; kindSel = [];
+    regionSel = []; typeSel = []; kindSel = []; staySel = [];
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
