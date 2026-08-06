@@ -894,6 +894,9 @@
       return !needle || norm(f[0]).indexOf(needle) !== -1;
     }).map(function (f) {
       return { name: f[0], id: f[1], region: f[2], open: !!avail[f[1]] };
+    }).sort(function (a, b) {
+      // 원본 순서는 "[공립](가평군)…" 의 시·군·구 기준이라 이름 순으로 다시 세운다
+      return bareName(a.name).localeCompare(bareName(b.name), "ko");
     });
   }
 
