@@ -130,6 +130,42 @@
     background: var(--surface-1); color: var(--text-secondary);
     font-size: .85rem; cursor: pointer; white-space: nowrap;
   }
+
+  /* 다중 선택 드롭다운 — select 는 값을 하나만 담아 여러 지역을 못 고른다 */
+  .multi { position: relative; }
+  .multi > summary {
+    list-style: none; cursor: pointer; white-space: nowrap;
+    padding: 8px 26px 8px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); font-size: .9rem;
+  }
+  .multi > summary::-webkit-details-marker { display: none; }
+  .multi > summary::after {
+    content: "⌄"; position: absolute; right: 10px; top: 5px;
+    color: var(--text-muted); font-size: .85rem;
+  }
+  .multi[open] > summary { border-color: var(--accent); }
+  .multi > summary.on {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 600;
+  }
+  .multi > summary.on::after { color: #fff; }
+  .multi-panel {
+    position: absolute; z-index: 20; top: calc(100% + 4px); left: 0;
+    min-width: 160px; max-width: calc(100vw - 24px);
+    max-height: 260px; overflow-y: auto;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--shadow); padding: 6px;
+  }
+  /* 좁은 화면에서 오른쪽 끝 버튼의 패널이 화면 밖으로 나가는 걸 막는다 */
+  .multi-panel.align-right { left: auto; right: 0; }
+  .multi-panel label {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 6px 8px; border-radius: 6px; font-size: .85rem;
+    color: var(--text-secondary); white-space: nowrap;
+  }
+  .multi-panel label:hover { background: var(--surface-2); }
+  .multi-panel input { accent-color: var(--accent); }
   .pill:hover { border-color: var(--accent); color: var(--accent-ink); }
   .pill[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent);
@@ -288,12 +324,14 @@
 
   <div class="controls">
     <div class="tabs" id="tabs"></div>
-    <select id="region" aria-label="지역 필터">
-      <option value="">전체 지역</option>
-    </select>
-    <select id="optype" aria-label="운영주체 필터">
-      <option value="">전체 주체</option>
-    </select>
+    <details class="multi" id="regionbox">
+      <summary aria-label="지역 필터">전체 지역</summary>
+      <div class="multi-panel" id="regionopts"></div>
+    </details>
+    <details class="multi" id="typebox">
+      <summary aria-label="운영주체 필터">전체 주체</summary>
+      <div class="multi-panel" id="typeopts"></div>
+    </details>
     <span class="pricebox">
       <input id="cmin" type="number" min="0" step="1" placeholder="최소"
              inputmode="numeric" aria-label="최소 정원(인)">
@@ -312,6 +350,7 @@
     </span>
     <input id="filter" type="search" placeholder="휴양림명" autocomplete="off">
     <button id="favonly" type="button" class="pill" hidden aria-pressed="false"></button>
+    <button id="share" type="button" class="pill">🔗 링크 복사</button>
     <button id="reset" type="button" hidden>필터 초기화</button>
   </div>
 
@@ -350,27 +389,46 @@
   var months = [];       // ["202608","202609"]
   var current = 0;       // months 인덱스
   var filterText = "";
-  var regionFilter = "";
   var minPrice = 0;      // 원 단위, 0 = 하한 없음
   var maxPrice = 0;      // 원 단위, 0 = 상한 없음
   var minPeople = 0;     // 수용 인원 하한, 0 = 없음
   var maxPeople = 0;     // 수용 인원 상한, 0 = 없음
-  var typeFilter = "";   // "국립"/"공립"/"사립", "" = 전체
+  // 지역·운영주체는 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
+  var regionSel = [];
+  var typeSel = [];
   var favorites = {};    // 지점ID -> true (관심 휴양림)
   var favOnly = false;   // 관심 휴양림만 보기
+
+  function has(list, v) { return list.length === 0 || list.indexOf(v) !== -1; }
 
   // 필터 조건과 관심 목록은 브라우저에 남겨 다음에 열 때 그대로 복원한다.
   // 관심 목록은 이름이 바뀌어도 견디도록 지점 ID 로 저장한다.
   var STORE_FILTERS = "foresttrip-calendar.filters";
   var STORE_FAVS = "foresttrip-calendar.favorites";
 
+  // 저장·URL 공유가 같은 형태를 쓰도록 상태를 한 곳에서 만든다
+  function currentState() {
+    return {
+      region: regionSel, type: typeSel, text: filterText,
+      cmin: minPeople, cmax: maxPeople,
+      pmin: minPrice, pmax: maxPrice, favOnly: favOnly
+    };
+  }
+
+  function applyState(s) {
+    if (!s) return;
+    // 이전 버전은 문자열 하나만 저장했다 — 배열로 받아 준다
+    regionSel = [].concat(s.region || []).filter(Boolean);
+    typeSel = [].concat(s.type || []).filter(Boolean);
+    filterText = s.text || "";
+    minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
+    minPrice = s.pmin || 0; maxPrice = s.pmax || 0;
+    favOnly = !!s.favOnly;
+  }
+
   function saveState() {
     try {
-      localStorage.setItem(STORE_FILTERS, JSON.stringify({
-        region: regionFilter, type: typeFilter, text: filterText,
-        cmin: minPeople, cmax: maxPeople,
-        pmin: minPrice, pmax: maxPrice, favOnly: favOnly
-      }));
+      localStorage.setItem(STORE_FILTERS, JSON.stringify(currentState()));
       localStorage.setItem(STORE_FAVS, JSON.stringify(Object.keys(favorites)));
     } catch (e) { /* 시크릿 모드 등 저장 불가 — 기능은 그대로 동작 */ }
   }
@@ -380,28 +438,61 @@
       (JSON.parse(localStorage.getItem(STORE_FAVS)) || []).forEach(function (id) {
         favorites[id] = true;
       });
-      var s = JSON.parse(localStorage.getItem(STORE_FILTERS)) || {};
-      regionFilter = s.region || "";
-      typeFilter = s.type || "";
-      filterText = s.text || "";
-      minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
-      minPrice = s.pmin || 0; maxPrice = s.pmax || 0;
-      favOnly = !!s.favOnly;
+      applyState(JSON.parse(localStorage.getItem(STORE_FILTERS)));
     } catch (e) { /* 저장값이 깨졌으면 기본값으로 시작 */ }
+  }
+
+  // ── URL 공유 ──────────────────────────────────────────────
+  // 주소에 조건이 실려 있으면 그쪽을 따른다(링크로 받은 조건이 내 저장값보다
+  // 우선이어야 공유가 의미 있다). 관심 목록도 함께 실어 그대로 재현한다.
+  function stateToQuery() {
+    var q = [];
+    var put = function (k, v) { if (v) q.push(k + "=" + encodeURIComponent(v)); };
+    put("r", regionSel.join(","));
+    put("t", typeSel.join(","));
+    put("q", filterText);
+    put("cmin", minPeople || "");
+    put("cmax", maxPeople || "");
+    put("pmin", minPrice ? minPrice / 10000 : "");
+    put("pmax", maxPrice ? maxPrice / 10000 : "");
+    var favIds = Object.keys(favorites);
+    if (favIds.length) put("fav", favIds.join(","));
+    if (favOnly) q.push("favonly=1");
+    return q.join("&");
+  }
+
+  function readQuery() {
+    var raw = location.search.replace(/^\?/, "");
+    if (!raw) return false;
+    var p = {};
+    raw.split("&").forEach(function (pair) {
+      var i = pair.indexOf("=");
+      if (i > 0) p[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
+    });
+    var known = ["r", "t", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
+    if (!known.some(function (k) { return k in p; })) return false;
+    var list = function (v) { return v ? v.split(",").filter(Boolean) : []; };
+    var num = function (v) { var n = parseFloat(v); return n > 0 ? n : 0; };
+    applyState({
+      region: list(p.r), type: list(p.t), text: p.q || "",
+      cmin: num(p.cmin), cmax: num(p.cmax),
+      pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
+      favOnly: p.favonly === "1"
+    });
+    if ("fav" in p) {
+      favorites = {};
+      list(p.fav).forEach(function (id) { favorites[id] = true; });
+    }
+    return true;
   }
 
   // 복원한 값을 입력 요소에 반영 (요금은 만원 단위로 되돌린다)
   function applyStateToControls() {
-    $("region").value = regionFilter;
-    $("optype").value = typeFilter;
     $("filter").value = filterText;
     $("cmin").value = minPeople || "";
     $("cmax").value = maxPeople || "";
     $("pmin").value = minPrice ? minPrice / 10000 : "";
     $("pmax").value = maxPrice ? maxPrice / 10000 : "";
-    // 저장된 지역·주체가 이번 데이터에 없으면(지점 변동) 조용히 전체로 되돌린다
-    if ($("region").value !== regionFilter) regionFilter = $("region").value;
-    if ($("optype").value !== typeFilter) typeFilter = $("optype").value;
   }
 
   function favCount() { return Object.keys(favorites).length; }
@@ -473,8 +564,8 @@
       var f = FORESTS[list[i][0]];
       if (!f) continue;
       if (favOnly && !favorites[f[1]]) continue;
-      if (regionFilter && FOREST_WIDE[list[i][0]] !== regionFilter) continue;
-      if (typeFilter && operatorType(f[0]) !== typeFilter) continue;
+      if (!has(regionSel, FOREST_WIDE[list[i][0]])) continue;
+      if (!has(typeSel, operatorType(f[0]))) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
       var slots = list[i][1];
       if (byRoom) {
@@ -574,26 +665,44 @@
       if (favOnly && !(f && favorites[f[1]])) return false;
       if (needle && norm(p.name).indexOf(needle) === -1 &&
           !(f && norm(f[0]).indexOf(needle) !== -1)) return false;
-      if (typeFilter && p.type !== typeFilter) return false;
-      if (regionFilter) {
+      if (!has(typeSel, p.type)) return false;
+      if (regionSel.length) {
         // 달력에 실린 지점이면 그 지점의 광역, 아니면 정책 표 값으로 판정한다
         var w = f ? wideArea(f[2], sigungu(f[0])) : wideArea(p.region, p.sigungu);
-        if (w !== regionFilter) return false;
+        if (!has(regionSel, w)) return false;
       }
       return true;
     });
   }
 
+  // 체크박스 목록을 그리고, 요약(summary)에 고른 값을 압축해 보여준다
+  function renderMulti(boxId, panelId, options, selected, allLabel) {
+    $(panelId).innerHTML = options.map(function (v) {
+      return '<label><input type="checkbox" value="' + esc(v) + '"' +
+        (selected.indexOf(v) !== -1 ? " checked" : "") + ">" + esc(v) + "</label>";
+    }).join("");
+    var sum = $(boxId).querySelector("summary");
+    if (!selected.length) {
+      sum.textContent = allLabel;
+      sum.classList.remove("on");
+    } else {
+      sum.textContent = selected.length <= 2
+        ? selected.join("·")
+        : selected[0] + " 외 " + (selected.length - 1);
+      sum.classList.add("on");
+    }
+  }
+
+  var regionOptions = [], typeOptions = [];
+
   function populateRegions() {
     // 지점 마스터에는 빈자리가 있는 지점만 담겨 있어 그대로 지역 목록이 된다
     var seen = {};
     FOREST_WIDE.forEach(function (w) { if (w) seen[w] = 1; });
-    var opts = Object.keys(seen).sort(function (a, b) {
+    regionOptions = Object.keys(seen).sort(function (a, b) {
       var ia = WIDE_ORDER.indexOf(a), ib = WIDE_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-    $("region").innerHTML = '<option value="">전체 지역</option>' +
-      opts.map(function (r) { return "<option>" + esc(r) + "</option>"; }).join("");
   }
 
   function populateTypes() {
@@ -604,12 +713,22 @@
     });
     // 국립 → 공립 → 사립 순으로 고정(가나다순이면 공립이 앞에 와 어색하다)
     var order = ["국립", "공립", "사립"];
-    var opts = Object.keys(seen).sort(function (a, b) {
+    typeOptions = Object.keys(seen).sort(function (a, b) {
       var ia = order.indexOf(a), ib = order.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-    $("optype").innerHTML = '<option value="">전체 주체</option>' +
-      opts.map(function (t) { return "<option>" + esc(t) + "</option>"; }).join("");
+  }
+
+  // 저장·공유로 받은 값 중 이번 데이터에 없는 것은 조용히 버린다(지점 구성이
+  // 매일 바뀌므로 남겨 두면 결과가 0건이 되어 버린다)
+  function pruneSelections() {
+    regionSel = regionSel.filter(function (v) { return regionOptions.indexOf(v) !== -1; });
+    typeSel = typeSel.filter(function (v) { return typeOptions.indexOf(v) !== -1; });
+  }
+
+  function renderFilterMenus() {
+    renderMulti("regionbox", "regionopts", regionOptions, regionSel, "전체 지역");
+    renderMulti("typebox", "typeopts", typeOptions, typeSel, "전체 주체");
   }
 
   function monthLabel(ym) {
@@ -913,8 +1032,9 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionFilter || typeFilter || minPeople || maxPeople ||
+    $("reset").hidden = !(regionSel.length || typeSel.length || minPeople || maxPeople ||
       minPrice || maxPrice || filterText || favOnly);
+    renderFilterMenus();
     renderFavToggle();
     renderTiles();
     renderTabs();
@@ -934,13 +1054,50 @@
     filterText = this.value.trim();
     rerender();
   });
-  $("region").addEventListener("change", function () {
-    regionFilter = this.value;
-    rerender();
+  // 체크박스는 패널을 다시 그리면 포커스가 날아가므로, 선택 값만 읽어 반영하고
+  // 요약 텍스트는 직접 갱신한다(패널은 열린 채로 여러 개를 고를 수 있어야 한다)
+  function bindMulti(boxId, panelId, getSel, setSel, allLabel) {
+    $(panelId).addEventListener("change", function () {
+      setSel(Array.prototype.map.call(
+        this.querySelectorAll("input:checked"), function (i) { return i.value; }
+      ));
+      var sel = getSel();
+      var sum = $(boxId).querySelector("summary");
+      if (!sel.length) { sum.textContent = allLabel; sum.classList.remove("on"); }
+      else {
+        sum.textContent = sel.length <= 2 ? sel.join("·") : sel[0] + " 외 " + (sel.length - 1);
+        sum.classList.add("on");
+      }
+      $("reset").hidden = false;
+      renderFavToggle();
+      renderTiles();
+      renderTabs();
+      renderGrid();
+      saveState();
+    });
+  }
+  bindMulti("regionbox", "regionopts",
+    function () { return regionSel; }, function (v) { regionSel = v; }, "전체 지역");
+  bindMulti("typebox", "typeopts",
+    function () { return typeSel; }, function (v) { typeSel = v; }, "전체 주체");
+
+  // 패널 밖을 누르면 닫는다
+  document.addEventListener("click", function (ev) {
+    Array.prototype.forEach.call(document.querySelectorAll(".multi[open]"), function (d) {
+      if (!d.contains(ev.target)) d.open = false;
+    });
   });
-  $("optype").addEventListener("change", function () {
-    typeFilter = this.value;
-    rerender();
+
+  // 열릴 때 화면을 넘치면 오른쪽 기준으로 붙인다
+  Array.prototype.forEach.call(document.querySelectorAll(".multi"), function (d) {
+    d.addEventListener("toggle", function () {
+      if (!d.open) return;
+      var panel = d.querySelector(".multi-panel");
+      panel.classList.remove("align-right");
+      if (panel.getBoundingClientRect().right > window.innerWidth - 8) {
+        panel.classList.add("align-right");
+      }
+    });
   });
   $("favonly").addEventListener("click", function () {
     favOnly = !favOnly;
@@ -989,13 +1146,48 @@
   $("cmax").addEventListener("input", readPeople);
 
   $("reset").addEventListener("click", function () {
-    $("region").value = ""; $("optype").value = "";
     $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
-    regionFilter = ""; typeFilter = "";
+    regionSel = []; typeSel = [];
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
+  });
+
+  // clipboard API 는 보안 컨텍스트에서만 쓸 수 있고 거부될 수도 있어
+  // 구형 execCommand 로 한 번 더 시도한다(prompt 는 막는 브라우저가 있어 안 쓴다).
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) resolve(); else reject();
+    });
+  }
+
+  // 현재 조건을 주소에 담아 복사한다 — 받는 쪽은 같은 화면으로 열린다
+  $("share").addEventListener("click", function () {
+    var q = stateToQuery();
+    var url = location.origin + location.pathname + (q ? "?" + q : "");
+    var btn = this, old = "🔗 링크 복사";
+    var flash = function (msg) {
+      btn.textContent = msg;
+      setTimeout(function () { btn.textContent = old; }, 1800);
+    };
+    // 복사가 막히더라도 주소창은 같은 조건이 되므로 그걸 복사하면 된다
+    history.replaceState(null, "", q ? "?" + q : location.pathname);
+    copyText(url).then(function () { flash("✓ 복사됨"); },
+      function () { flash("주소창을 복사하세요"); });
   });
   $("grid").addEventListener("click", function (ev) {
     var cell = ev.target.closest(".day.has");
@@ -1044,8 +1236,9 @@
       buildAreaCache();     // populateRegions 가 광역 목록을 쓰므로 그 앞에서
       populateRegions();
       populateTypes();
-      // 저장된 조건은 옵션이 채워진 뒤에 넣어야 select 에 반영된다
-      loadState();
+      // 주소에 조건이 실려 있으면 그쪽이 우선(공유 링크), 없으면 저장값을 복원
+      if (!readQuery()) loadState();
+      pruneSelections();
       applyStateToControls();
       rerender();
     })
