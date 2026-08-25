@@ -152,9 +152,18 @@ if ! "$PYTHON" batch/fetch_lottery.py data/policy.json data/directory.json data/
   log "⚠ 추첨 여부 확인 실패 — 기존 결과로 진행"
 fi
 
+# ── 카카오맵 평점 (국립·공립만, 오래된 것부터 조금씩) ────────────────
+# 숲나들e 에는 평점이 없어 카카오맵에서 읽는다. 자주 바뀌지 않으니 14일 지난
+# 것만, 하루 40곳까지만 본다(브라우저 렌더링이 필요해 지점당 2~3초 걸린다).
+log "평점 수집(증분)"
+if ! "$PYTHON" batch/fetch_ratings.py data/directory.json data/ratings.json \
+     --max 40 --stale-days 14; then
+  log "⚠ 평점 수집 실패 — 기존 평점으로 진행"
+fi
+
 # ── 변환 → docs/data/vacancy.json ───────────────────────────────────
 if ! "$PYTHON" batch/transform.py data/raw_priced.json docs/data/vacancy.json \
-     data/policy.json data/directory.json data/lottery.json; then
+     data/policy.json data/directory.json data/lottery.json data/ratings.json; then
   log "✗ 변환 실패 — 배포 중단"
   exit 1
 fi

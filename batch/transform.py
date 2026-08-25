@@ -84,11 +84,35 @@ def parse_int(value) -> int:
         return 0
 
 
+# 표본이 적은 평점을 전체 평균 쪽으로 당기는 보정(베이즈 평균).
+# m 은 "이 정도 리뷰는 있어야 점수를 그대로 믿는다" 는 기준값이다.
+RATING_PRIOR = 10
+
+
+def weighted_ratings(ratings: dict | None) -> dict:
+    places = ((ratings or {}).get("places") or {})
+    valid = {
+        fid: rec for fid, rec in places.items()
+        if rec.get("verified") and rec.get("score")
+    }
+    if not valid:
+        return {}
+    mean = sum(r["score"] for r in valid.values()) / len(valid)
+    out = {}
+    for fid, rec in valid.items():
+        score = float(rec["score"])
+        n = int(rec.get("reviews") or 0)
+        adj = (n * score + RATING_PRIOR * mean) / (n + RATING_PRIOR)
+        out[fid] = [score, n, round(adj, 2)]
+    return out
+
+
 def transform(
     raw: dict,
     policies: list | None = None,
     directory: list | None = None,
     lottery: dict | None = None,
+    ratings: dict | None = None,
 ) -> dict:
     categories: list[str] = []
     cat_idx: dict[str, int] = {}
@@ -155,6 +179,10 @@ def transform(
         "directory": directory or [],
         # 월추첨제를 함께 운영하는 지점 ID (fetch_lottery.py 판정)
         "lottery_ids": (lottery or {}).get("lottery_ids", []),
+        # 카카오맵 평점 {지점ID: [점수, 리뷰수, 보정점수]} — 국립·공립만 수집.
+        # 리뷰가 1~3건인 곳이 5.0 이나 1.0 으로 튀어 순위가 뒤집히므로, 표본이
+        # 적을수록 전체 평균으로 끌어당기는 보정값을 함께 싣고 필터는 그걸 쓴다.
+        "ratings": weighted_ratings(ratings),
         "categories": categories,
         "forests": forests,
         "rooms": rooms,
@@ -174,10 +202,10 @@ def load_optional(path: str | None):
 
 
 def main() -> int:
-    if len(sys.argv) not in (3, 4, 5, 6):
+    if len(sys.argv) not in (3, 4, 5, 6, 7):
         print(
             "usage: transform.py <raw.json> <vacancy.json> "
-            "[policy.json] [directory.json] [lottery.json]",
+            "[policy.json] [directory.json] [lottery.json] [ratings.json]",
             file=sys.stderr,
         )
         return 2
@@ -186,7 +214,8 @@ def main() -> int:
     policies = load_optional(sys.argv[3] if len(sys.argv) > 3 else None)
     directory = load_optional(sys.argv[4] if len(sys.argv) > 4 else None)
     lottery = load_optional(sys.argv[5] if len(sys.argv) > 5 else None)
-    out = transform(raw, policies, directory, lottery)
+    ratings = load_optional(sys.argv[6] if len(sys.argv) > 6 else None)
+    out = transform(raw, policies, directory, lottery, ratings)
     with open(sys.argv[2], "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 

@@ -166,6 +166,11 @@
   }
   .multi-panel label:hover { background: var(--surface-2); }
   .multi-panel input { accent-color: var(--accent); }
+  .multi-panel hr { border: none; border-top: 1px solid var(--border); margin: 6px 4px; }
+  .multi-note {
+    font-size: .68rem; color: var(--text-muted); padding: 2px 8px 4px;
+    max-width: 190px; line-height: 1.45;
+  }
   .pill:hover { border-color: var(--accent); color: var(--accent-ink); }
   .pill[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent);
@@ -198,7 +203,13 @@
   .fl-row a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
   .fl-row.off a { color: var(--text-muted); }
   .fl-meta { margin-left: auto; font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
+  .fl-score, .forest h3 .score {
+    font-size: .72rem; color: #eda100; white-space: nowrap; font-weight: 600;
+  }
+  .forest h3 .score { font-weight: 600; }
   .fl-meta em { font-style: normal; color: var(--warn-ink); }
+  /* 자리가 거의 안 나는 곳 — 인기 있다는 신호 */
+  .fl-days.hot { color: var(--warn-ink); font-weight: 600; }
 
   /* 상세 팝업의 관심 등록 별 */
   .fav {
@@ -385,6 +396,10 @@
              inputmode="numeric" aria-label="최대 요금(만원)">
       <span class="unit">만원</span>
     </span>
+    <details class="multi" id="scorebox">
+      <summary aria-label="평점 필터">전체 평점</summary>
+      <div class="multi-panel" id="scoreopts"></div>
+    </details>
     <input id="filter" type="search" placeholder="휴양림명" autocomplete="off">
     <button id="favonly" type="button" class="pill" hidden aria-pressed="false"></button>
     <button id="share" type="button" class="pill">🔗 링크 복사</button>
@@ -433,6 +448,11 @@
   var FORESTS = [];      // [이름, 지점ID, 지역] — 빈자리가 있어 달력에 실린 지점
   var DIRECTORY = [];    // 같은 형식의 전 지점 목록(빈자리 없는 곳 포함)
   var LOTTERY = {};      // 지점ID -> true (월추첨제 병행, 배치가 매일 판정)
+  var RATINGS = {};      // 지점ID -> [평점, 리뷰수] (카카오맵, 국립·공립만)
+  // 차로 갈 수 없어 배를 타야 하는 섬. 이름에 "~도" 가 들어가도 연륙교가 있으면
+  // 차로 들어간다(석모대교·완도대교·진도대교·안면대교·무의대교·새만금방조제).
+  // 실제로 배가 필요한 곳만 적어 둔다.
+  var FERRY_ONLY = { "ID02030127": "덕적도(인천 옹진) — 여객선" };
   var ROOMS = [];        // [이름, 유형idx, 정원, 면적]
   var CATEGORIES = [];
   var months = [];       // ["202608","202609"]
@@ -445,6 +465,8 @@
   // 지역·운영주체·시설 구분은 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
   var regionSel = [];
   var typeSel = [];
+  var minScore = 0;      // 최소 평점(카카오맵), 0 = 전체
+  var noFerry = false;    // 배편으로만 가는 섬 제외
   var staySel = [];      // "숙박" / "캠핑" (대분류)
   var kindSel = [];      // 숙박 세부 구분 라벨("독채"…)
   // rooms[].4 의 시설 구분 코드 ↔ 라벨
@@ -467,6 +489,7 @@
   function currentState() {
     return {
       region: regionSel, type: typeSel, stay: staySel, kind: kindSel, text: filterText,
+      score: minScore, noFerry: noFerry,
       cmin: minPeople, cmax: maxPeople,
       pmin: minPrice, pmax: maxPrice, favOnly: favOnly
     };
@@ -478,6 +501,8 @@
     regionSel = [].concat(s.region || []).filter(Boolean);
     typeSel = [].concat(s.type || []).filter(Boolean);
     staySel = [].concat(s.stay || []).filter(Boolean);
+    minScore = s.score || 0;
+    noFerry = !!s.noFerry;
     kindSel = [].concat(s.kind || []).filter(Boolean);
     filterText = s.text || "";
     minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
@@ -511,6 +536,8 @@
     put("t", typeSel.join(","));
     put("s", staySel.join(","));
     put("k", kindSel.join(","));
+    put("score", minScore || "");
+    if (noFerry) q.push("noferry=1");
     put("q", filterText);
     put("cmin", minPeople || "");
     put("cmax", maxPeople || "");
@@ -530,12 +557,13 @@
       var i = pair.indexOf("=");
       if (i > 0) p[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
     });
-    var known = ["r", "t", "s", "k", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
+    var known = ["r", "t", "s", "k", "score", "noferry", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
     if (!known.some(function (k) { return k in p; })) return false;
     var list = function (v) { return v ? v.split(",").filter(Boolean) : []; };
     var num = function (v) { var n = parseFloat(v); return n > 0 ? n : 0; };
     applyState({
       region: list(p.r), type: list(p.t), stay: list(p.s), kind: list(p.k), text: p.q || "",
+      score: num(p.score), noFerry: p.noferry === "1",
       cmin: num(p.cmin), cmax: num(p.cmax),
       pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
       favOnly: p.favonly === "1"
@@ -554,6 +582,13 @@
     $("cmax").value = maxPeople || "";
     $("pmin").value = minPrice ? minPrice / 10000 : "";
     $("pmax").value = maxPrice ? maxPrice / 10000 : "";
+  }
+
+  // "★4.5 (23)" — 평점을 모르는 곳(사립·미수집)은 빈 문자열
+  // 표시는 카카오맵 원점수와 리뷰 수 그대로. 필터 비교만 보정 점수를 쓴다.
+  function scoreTag(insttId) {
+    var r = RATINGS[insttId];
+    return r ? "★" + r[0].toFixed(1) + " (" + r[1] + ")" : "";
   }
 
   function favCount() { return Object.keys(favorites).length; }
@@ -638,6 +673,14 @@
       var f = FORESTS[list[i][0]];
       if (!f) continue;
       if (favOnly && !favorites[f[1]]) continue;
+      if (noFerry && FERRY_ONLY[f[1]]) continue;
+      if (minScore > 0) {
+        var rt = RATINGS[f[1]];
+        // 평점을 모르는 곳(사립은 수집 대상이 아니다)은 판정할 수 없어 제외한다.
+        // 비교는 리뷰 수를 반영한 보정 점수(rt[2])로 한다 — 리뷰 1건 5.0 이
+        // 리뷰 26건 4.9 를 제치는 걸 막는다.
+        if (!rt || (rt[2] || rt[0]) < minScore) continue;
+      }
       if (!has(regionSel, FOREST_WIDE[list[i][0]])) continue;
       if (!has(typeSel, operatorType(f[0]))) continue;
       if (needle && norm(f[0]).indexOf(needle) === -1) continue;
@@ -738,6 +781,11 @@
     return list.filter(function (p) {
       var f = forestOfPolicy && forestOfPolicy.get(p);
       if (favOnly && !(f && favorites[f[1]])) return false;
+      if (noFerry && f && FERRY_ONLY[f[1]]) return false;
+      if (minScore > 0) {
+        var rt = f && RATINGS[f[1]];
+        if (!rt || (rt[2] || rt[0]) < minScore) return false;
+      }
       if (needle && norm(p.name).indexOf(needle) === -1 &&
           !(f && norm(f[0]).indexOf(needle) !== -1)) return false;
       if (!has(typeSel, p.type)) return false;
@@ -814,7 +862,30 @@
     kindSel = kindSel.filter(function (v) { return kindOptions.indexOf(v) !== -1; });
   }
 
+  // 평점은 "이상" 하나만 고르는 성격이라 라디오로 그린다. 배편 제외도 같은 패널에.
+  function renderScoreMenu() {
+    var steps = [4.5, 4.3, 4.0, 3.5];
+    var html = steps.map(function (v) {
+      return '<label><input type="radio" name="scoresel" value="' + v + '"' +
+        (minScore === v ? " checked" : "") + "> " + v.toFixed(1) + " 이상</label>";
+    }).join("") +
+      '<label><input type="radio" name="scoresel" value="0"' +
+      (minScore ? "" : " checked") + "> 전체</label>" +
+      '<hr><label><input type="checkbox" id="noferry"' + (noFerry ? " checked" : "") +
+      "> 배편 필요 제외</label>" +
+      '<p class="multi-note">카카오맵 평점(국립·공립). 리뷰가 적은 곳은 ' +
+      "점수를 그대로 믿지 않고 평균 쪽으로 보정해 비교합니다.</p>";
+    $("scoreopts").innerHTML = html;
+    var sum = $("scorebox").querySelector("summary");
+    var parts = [];
+    if (minScore) parts.push("★" + minScore.toFixed(1) + "+");
+    if (noFerry) parts.push("배편 제외");
+    sum.textContent = parts.length ? parts.join(" · ") : "전체 평점";
+    sum.classList.toggle("on", parts.length > 0);
+  }
+
   function renderFilterMenus() {
+    renderScoreMenu();
     renderMulti("regionbox", "regionopts", regionOptions, regionSel, "전체 지역");
     renderMulti("typebox", "typeopts", typeOptions, typeSel, "전체 주체");
     renderMulti("staybox", "stayopts", stayOptions, staySel, "숙박+캠핑");
@@ -884,16 +955,30 @@
   // 검색해도 안 잡히므로, 전 지점(디렉터리)을 여기서 훑어보고 관심 등록까지
   // 할 수 있게 한다.
   function forestListRows(query) {
-    var avail = {};   // 현재 조건으로 빈자리가 있는 지점ID
-    Object.keys(DATA.days || {}).forEach(function (k) {
-      entriesFor(k).forEach(function (e) { if (e.id) avail[e.id] = 1; });
+    // 지점별로 "빈자리가 있던 날 수" 를 센다. 자리가 잘 안 나는 곳일수록 작다 —
+    // 인기도를 가늠하는 보조 지표다(접근성 때문에 남는 곳도 있으니 절대 기준은 아니다).
+    //
+    // 여기서는 화면 필터를 적용하지 않는다. 평점·요금 조건 때문에 0 이 된 것과
+    // 정말 자리가 없는 것을 구분할 수 없게 되기 때문이다. 목록은 "이 휴양림에
+    // 이 기간 자리가 나는가" 라는 사실만 보여준다.
+    var avail = {};
+    var dayKeys = Object.keys(DATA.days || {});
+    dayKeys.forEach(function (k) {
+      (DATA.days[k] || []).forEach(function (g) {
+        var f = FORESTS[g[0]];
+        if (f && f[1]) avail[f[1]] = (avail[f[1]] || 0) + 1;
+      });
     });
+    var totalDays = dayKeys.length;
     var needle = query ? norm(query) : null;
     var source = DIRECTORY.length ? DIRECTORY : FORESTS;
     return source.filter(function (f) {
       return !needle || norm(f[0]).indexOf(needle) !== -1;
     }).map(function (f) {
-      return { name: f[0], id: f[1], region: f[2], open: !!avail[f[1]] };
+      return {
+        name: f[0], id: f[1], region: f[2],
+        open: !!avail[f[1]], days: avail[f[1]] || 0, total: totalDays
+      };
     }).sort(function (a, b) {
       // 원본 순서는 "[공립](가평군)…" 의 시·군·구 기준이라 이름 순으로 다시 세운다
       return bareName(a.name).localeCompare(bareName(b.name), "ko");
@@ -916,10 +1001,15 @@
             (on ? "★" : "☆") + "</button>" +
             '<a href="' + forestUrl(r.id, r.name) + '" target="_blank" rel="noopener">' +
             esc(bareName(r.name)) + "</a>" +
+            (scoreTag(r.id) ? '<span class="fl-score">' + esc(scoreTag(r.id)) + "</span>" : "") +
             '<span class="fl-meta">' +
             esc([operatorType(r.name), areaLabel(r.region, sigungu(r.name))]
               .filter(Boolean).join(" · ")) +
-            (r.open ? "" : ' · <em>빈자리 없음</em>') + "</span></div>";
+            (FERRY_ONLY[r.id] ? ' · <em title="' + esc(FERRY_ONLY[r.id]) + '">🚢 배편</em>' : "") +
+            (r.open
+              ? ' · <span class="fl-days' + (r.days <= Math.max(2, r.total * 0.15) ? " hot" : "") +
+                '">빈자리 ' + r.days + "/" + r.total + "일</span>"
+              : ' · <em>빈자리 없음</em>') + "</span></div>";
         }).join("");
   }
 
@@ -1164,6 +1254,7 @@
       return '<div class="forest"><h3>' + star +
         '<a class="fname" href="' + forestUrl(e.id, e.name) + '" target="_blank" rel="noopener"' +
         ' title="숲나들e 휴양림 페이지 열기 (예약은 그 화면에서)">' + esc(e.name) + "</a>" +
+        (scoreTag(e.id) ? '<span class="score">' + esc(scoreTag(e.id)) + "</span>" : "") +
         '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
@@ -1174,7 +1265,7 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || staySel.length || minPeople || maxPeople ||
+    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || staySel.length || minScore || noFerry || minPeople || maxPeople ||
       minPrice || maxPrice || filterText || favOnly);
     renderFilterMenus();
     renderFavToggle();
@@ -1224,6 +1315,11 @@
     function () { return typeSel; }, function (v) { typeSel = v; }, "전체 주체");
   bindMulti("staybox", "stayopts",
     function () { return staySel; }, function (v) { staySel = v; }, "숙박+캠핑");
+  $("scoreopts").addEventListener("change", function (ev) {
+    if (ev.target.name === "scoresel") minScore = parseFloat(ev.target.value) || 0;
+    if (ev.target.id === "noferry") noFerry = ev.target.checked;
+    rerender();
+  });
   bindMulti("kindbox", "kindopts",
     function () { return kindSel; }, function (v) { kindSel = v; }, "전체 시설");
 
@@ -1324,6 +1420,7 @@
     $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
     regionSel = []; typeSel = []; kindSel = []; staySel = [];
+    minScore = 0; noFerry = false;
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
@@ -1388,6 +1485,7 @@
       DIRECTORY = DATA.directory || [];
       LOTTERY = {};
       (DATA.lottery_ids || []).forEach(function (id) { LOTTERY[id] = true; });
+      RATINGS = DATA.ratings || {};
       ROOMS = DATA.rooms || [];
       CATEGORIES = DATA.categories || [];
       var from = DATA.range.from, to = DATA.range.to;
