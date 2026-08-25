@@ -335,6 +335,7 @@
   .open-row .ol a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
   .open-row .ol a::after { content: " ↗"; font-size: .68rem; color: var(--text-muted); }
   .otag { font-style: normal; font-size: .68rem; color: var(--text-muted); }
+  .otag.score { color: #eda100; font-weight: 600; }
   .otag.lot {
     color: var(--warn-ink); border: 1px solid var(--warn-ink);
     border-radius: 999px; padding: 0 6px; opacity: .85;
@@ -484,6 +485,10 @@
   // 관심 목록은 이름이 바뀌어도 견디도록 지점 ID 로 저장한다.
   var STORE_FILTERS = "foresttrip-calendar.filters";
   var STORE_FAVS = "foresttrip-calendar.favorites";
+  // 공유 링크로 열었을 때는 그 조건을 저장하지 않는다. 링크는 "이번에 이렇게
+  // 보기" 지 내 기본 설정을 바꾸는 게 아니다. 화면에서 무엇이든 만지는 순간
+  // 해제되어 그때부터 저장한다.
+  var fromUrl = false;
 
   // 저장·URL 공유가 같은 형태를 쓰도록 상태를 한 곳에서 만든다
   function currentState() {
@@ -511,17 +516,23 @@
   }
 
   function saveState() {
+    if (fromUrl) return;
     try {
       localStorage.setItem(STORE_FILTERS, JSON.stringify(currentState()));
       localStorage.setItem(STORE_FAVS, JSON.stringify(Object.keys(favorites)));
     } catch (e) { /* 시크릿 모드 등 저장 불가 — 기능은 그대로 동작 */ }
   }
 
-  function loadState() {
+  function loadFavorites() {
     try {
       (JSON.parse(localStorage.getItem(STORE_FAVS)) || []).forEach(function (id) {
         favorites[id] = true;
       });
+    } catch (e) { /* 저장값이 깨졌으면 빈 목록으로 시작 */ }
+  }
+
+  function loadFilters() {
+    try {
       applyState(JSON.parse(localStorage.getItem(STORE_FILTERS)));
     } catch (e) { /* 저장값이 깨졌으면 기본값으로 시작 */ }
   }
@@ -568,10 +579,8 @@
       pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
       favOnly: p.favonly === "1"
     });
-    if ("fav" in p) {
-      favorites = {};
-      list(p.fav).forEach(function (id) { favorites[id] = true; });
-    }
+    // 받은 관심 목록은 내 목록에 더한다(덮어쓰면 링크 한 번에 내 ★ 가 사라진다)
+    list(p.fav).forEach(function (id) { favorites[id] = true; });
     return true;
   }
 
@@ -1200,6 +1209,7 @@
             ? areaLabel(f[2], sigungu(f[0]))
             : areaLabel(p.region, p.sigungu);
           var where = [p.type, area].filter(Boolean).join(" · ");
+          var st = f && f[1] ? scoreTag(f[1]) : "";
           // 지점 ID 를 알면 소개 페이지로 직행하고, 모르면 검색으로 폴백한다.
           // 폴백 검색어는 띄어쓰기가 살아 있는 정책 표 원문(label)을 쓴다
           // (name 은 공백을 지운 매칭 전용이라 검색이 0건으로 뜬다).
@@ -1209,7 +1219,8 @@
           return '<div class="open-row">' +
             '<span class="ol"><a href="' + href + '" target="_blank" rel="noopener">' +
             esc(bareName(p.label || p.name)) + "</a>" +
-            '<em class="otag">' + esc(where) + "</em>" + lot + "</span>" +
+            '<em class="otag">' + esc(where) + "</em>" +
+            (st ? '<em class="otag score">' + esc(st) + "</em>" : "") + lot + "</span>" +
             "<span>" + esc(p.rule) + "</span></div>";
         }).join("") +
         '<p class="open-note">휴양림이 공고한 정기 오픈일입니다. 대부분 선착순 ' +
@@ -1276,6 +1287,13 @@
   }
 
   // ── 이벤트 ──────────────────────────────────────────────
+  // 캡처 단계에서 먼저 해제해, 뒤따르는 핸들러의 저장이 정상 동작하게 한다
+  ["change", "input", "click"].forEach(function (type) {
+    document.addEventListener(type, function (ev) {
+      if (!fromUrl) return;
+      if (ev.target.closest(".controls, #fl-rows, #dlg-body, #fl-search")) fromUrl = false;
+    }, true);
+  });
   $("tabs").addEventListener("click", function (ev) {
     var b = ev.target.closest("button");
     if (!b) return;
@@ -1510,8 +1528,10 @@
       populateRegions();
       populateTypes();
       populateKinds();
-      // 주소에 조건이 실려 있으면 그쪽이 우선(공유 링크), 없으면 저장값을 복원
-      if (!readQuery()) loadState();
+      // 관심 목록은 늘 복원하고, 필터 조건만 주소가 있으면 그쪽을 따른다
+      loadFavorites();
+      fromUrl = readQuery();
+      if (!fromUrl) loadFilters();
       pruneSelections();
       applyStateToControls();
       rerender();
