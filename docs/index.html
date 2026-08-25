@@ -208,8 +208,12 @@
   }
   .forest h3 .score { font-weight: 600; }
   .fl-meta em { font-style: normal; color: var(--warn-ink); }
-  /* 자리가 거의 안 나는 곳 — 인기 있다는 신호 */
-  .fl-days.hot { color: var(--warn-ink); font-weight: 600; }
+  .scarce {
+    font-style: normal; font-size: .68rem; font-weight: 600;
+    border-radius: 999px; padding: 0 6px; white-space: nowrap; margin-left: 6px;
+  }
+  .scarce.hot { color: var(--warn-ink); border: 1px solid var(--warn-ink); }
+  .scarce.full { color: #fff; background: var(--sun); }
 
   /* 상세 팝업의 관심 등록 별 */
   .fav {
@@ -462,7 +466,11 @@
   var minPrice = 0;      // 원 단위, 0 = 하한 없음
   var maxPrice = 0;      // 원 단위, 0 = 상한 없음
   var minPeople = 0;     // 수용 인원 하한, 0 = 없음
-  var maxPeople = 0;     // 수용 인원 상한, 0 = 없음
+  // 처음 열었을 때의 기본 상한. 대형 단체 객실이 목록을 덮어 원하는 규모가
+  // 묻히는 걸 막는다. 저장된 조건이나 공유 링크가 있으면 그쪽을 따르고,
+  // 사용자가 비우면 그 상태가 저장돼 다시 강제되지 않는다.
+  var DEFAULT_MAX_PEOPLE = 6;
+  var maxPeople = DEFAULT_MAX_PEOPLE;
   // 지역·운영주체·시설 구분은 여러 개를 함께 고를 수 있다. 빈 배열 = 전체.
   var regionSel = [];
   var typeSel = [];
@@ -591,6 +599,43 @@
     $("cmax").value = maxPeople || "";
     $("pmin").value = minPrice ? minPrice / 10000 : "";
     $("pmax").value = maxPrice ? maxPrice / 10000 : "";
+  }
+
+  // ── 예약 난이도 ───────────────────────────────────────────
+  // 조회 기간 중 그 지점에 빈자리가 있던 날 수. 적을수록 자리 잡기 어렵다.
+  // 화면 필터와 무관하게 원본 데이터로 센다(평점·요금 때문에 0 이 된 것과
+  // 정말 자리가 없는 것을 구분할 수 없게 되기 때문).
+  var AVAIL_DAYS = {}, TOTAL_DAYS = 0;
+
+  function buildAvailStats() {
+    AVAIL_DAYS = {};
+    var keys = Object.keys(DATA.days || {});
+    TOTAL_DAYS = keys.length;
+    keys.forEach(function (k) {
+      (DATA.days[k] || []).forEach(function (g) {
+        var f = FORESTS[g[0]];
+        if (f && f[1]) AVAIL_DAYS[f[1]] = (AVAIL_DAYS[f[1]] || 0) + 1;
+      });
+    });
+  }
+
+  // 자리가 거의 안 나는 곳을 한 눈에. 접근성 때문에 남는 곳도 있으니
+  // "좋은 곳" 의 증거는 아니지만, 인기 있는 곳을 놓치지 않게 해 준다.
+  function scarcity(insttId) {
+    if (!TOTAL_DAYS || !insttId) return null;
+    var d = AVAIL_DAYS[insttId] || 0;
+    if (d === 0) return { cls: "full", label: "만실", days: 0 };
+    if (d <= Math.max(2, Math.round(TOTAL_DAYS * 0.15))) {
+      return { cls: "hot", label: "자리 귀함", days: d };
+    }
+    return { cls: "", label: "", days: d };
+  }
+
+  function scarcityBadge(insttId) {
+    var s = scarcity(insttId);
+    if (!s || !s.label) return "";
+    return '<em class="scarce ' + s.cls + '" title="조회 기간 ' + TOTAL_DAYS +
+      "일 중 빈자리가 있던 날 " + s.days + '일">' + s.label + "</em>";
   }
 
   // "★4.5 (23)" — 평점을 모르는 곳(사립·미수집)은 빈 문자열
@@ -964,21 +1009,7 @@
   // 검색해도 안 잡히므로, 전 지점(디렉터리)을 여기서 훑어보고 관심 등록까지
   // 할 수 있게 한다.
   function forestListRows(query) {
-    // 지점별로 "빈자리가 있던 날 수" 를 센다. 자리가 잘 안 나는 곳일수록 작다 —
-    // 인기도를 가늠하는 보조 지표다(접근성 때문에 남는 곳도 있으니 절대 기준은 아니다).
-    //
-    // 여기서는 화면 필터를 적용하지 않는다. 평점·요금 조건 때문에 0 이 된 것과
-    // 정말 자리가 없는 것을 구분할 수 없게 되기 때문이다. 목록은 "이 휴양림에
-    // 이 기간 자리가 나는가" 라는 사실만 보여준다.
-    var avail = {};
-    var dayKeys = Object.keys(DATA.days || {});
-    dayKeys.forEach(function (k) {
-      (DATA.days[k] || []).forEach(function (g) {
-        var f = FORESTS[g[0]];
-        if (f && f[1]) avail[f[1]] = (avail[f[1]] || 0) + 1;
-      });
-    });
-    var totalDays = dayKeys.length;
+    // 빈자리 통계는 buildAvailStats 가 미리 계산해 둔 값을 쓴다
     var needle = query ? norm(query) : null;
     var source = DIRECTORY.length ? DIRECTORY : FORESTS;
     return source.filter(function (f) {
@@ -986,7 +1017,7 @@
     }).map(function (f) {
       return {
         name: f[0], id: f[1], region: f[2],
-        open: !!avail[f[1]], days: avail[f[1]] || 0, total: totalDays
+        open: (AVAIL_DAYS[f[1]] || 0) > 0, days: AVAIL_DAYS[f[1]] || 0, total: TOTAL_DAYS
       };
     }).sort(function (a, b) {
       // 원본 순서는 "[공립](가평군)…" 의 시·군·구 기준이라 이름 순으로 다시 세운다
@@ -1015,10 +1046,8 @@
             esc([operatorType(r.name), areaLabel(r.region, sigungu(r.name))]
               .filter(Boolean).join(" · ")) +
             (FERRY_ONLY[r.id] ? ' · <em title="' + esc(FERRY_ONLY[r.id]) + '">🚢 배편</em>' : "") +
-            (r.open
-              ? ' · <span class="fl-days' + (r.days <= Math.max(2, r.total * 0.15) ? " hot" : "") +
-                '">빈자리 ' + r.days + "/" + r.total + "일</span>"
-              : ' · <em>빈자리 없음</em>') + "</span></div>";
+            (r.open ? ' · <span class="fl-days">빈자리 ' + r.days + "/" + r.total + "일</span>" : "") +
+            "</span>" + scarcityBadge(r.id) + "</div>";
         }).join("");
   }
 
@@ -1220,7 +1249,8 @@
             '<span class="ol"><a href="' + href + '" target="_blank" rel="noopener">' +
             esc(bareName(p.label || p.name)) + "</a>" +
             '<em class="otag">' + esc(where) + "</em>" +
-            (st ? '<em class="otag score">' + esc(st) + "</em>" : "") + lot + "</span>" +
+            (st ? '<em class="otag score">' + esc(st) + "</em>" : "") +
+            (f && f[1] ? scarcityBadge(f[1]) : "") + lot + "</span>" +
             "<span>" + esc(p.rule) + "</span></div>";
         }).join("") +
         '<p class="open-note">휴양림이 공고한 정기 오픈일입니다. 대부분 선착순 ' +
@@ -1267,6 +1297,7 @@
         '<a class="fname" href="' + forestUrl(e.id, e.name) + '" target="_blank" rel="noopener"' +
         ' title="숲나들e 휴양림 페이지 열기 (예약은 그 화면에서)">' + esc(e.name) + "</a>" +
         (scoreTag(e.id) ? '<span class="score">' + esc(scoreTag(e.id)) + "</span>" : "") +
+        scarcityBadge(e.id) +
         '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
@@ -1525,11 +1556,13 @@
       current = Math.max(0, months.indexOf(curYm));
       buildPolicyIndex();
       buildForestLinks();   // policyFor 가 준비된 뒤에 역방향 맵을 만든다
+      buildAvailStats();
       buildAreaCache();     // populateRegions 가 광역 목록을 쓰므로 그 앞에서
       populateRegions();
       populateTypes();
       populateKinds();
-      // 관심 목록은 늘 복원하고, 필터 조건만 주소가 있으면 그쪽을 따른다
+      // 관심 목록은 늘 복원하고, 필터 조건만 주소가 있으면 그쪽을 따른다.
+      // 저장값도 링크도 없는 첫 방문에서는 위의 기본 상한(6인)이 그대로 쓰인다.
       loadFavorites();
       fromUrl = readQuery();
       if (!fromUrl) loadFilters();
