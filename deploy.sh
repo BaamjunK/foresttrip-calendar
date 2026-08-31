@@ -161,9 +161,16 @@ if ! "$PYTHON" batch/fetch_ratings.py data/directory.json data/ratings.json \
   log "⚠ 평점 수집 실패 — 기존 평점으로 진행"
 fi
 
+# ── 지점 객실 구성 (만실 지점도 포함해 특징 판별에 쓴다) ─────────────
+log "지점 프로파일 수집"
+if ! "$PYTHON" batch/fetch_profiles.py data/directory.json data/profiles.json --days 2; then
+  log "⚠ 프로파일 수집 실패 — 기존 파일로 진행"
+fi
+
 # ── 변환 → docs/data/vacancy.json ───────────────────────────────────
 if ! "$PYTHON" batch/transform.py data/raw_priced.json docs/data/vacancy.json \
-     data/policy.json data/directory.json data/lottery.json data/ratings.json; then
+     data/policy.json data/directory.json data/lottery.json data/ratings.json \
+     data/profiles.json; then
   log "✗ 변환 실패 — 배포 중단"
   exit 1
 fi

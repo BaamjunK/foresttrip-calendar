@@ -214,6 +214,11 @@
   }
   .scarce.hot { color: var(--warn-ink); border: 1px solid var(--warn-ink); }
   .scarce.full { color: #fff; background: var(--sun); }
+  .like {
+    font-style: normal; font-size: .68rem; font-weight: 600; margin-left: 6px;
+    color: #fff; background: var(--accent); border-radius: 999px; padding: 0 6px;
+    white-space: nowrap;
+  }
 
   /* 상세 팝업의 관심 등록 별 */
   .fav {
@@ -454,6 +459,7 @@
   var DIRECTORY = [];    // 같은 형식의 전 지점 목록(빈자리 없는 곳 포함)
   var LOTTERY = {};      // 지점ID -> true (월추첨제 병행, 배치가 매일 판정)
   var RATINGS = {};      // 지점ID -> [평점, 리뷰수] (카카오맵, 국립·공립만)
+  var PROFILES = {};     // 지점ID -> [숙박객실, 독채수, 정원중간, 면적중간, 캠핑수]
   // 차로 갈 수 없어 배를 타야 하는 섬. 이름에 "~도" 가 들어가도 연륙교가 있으면
   // 차로 들어간다(석모대교·완도대교·진도대교·안면대교·무의대교·새만금방조제).
   // 실제로 배가 필요한 곳만 적어 둔다.
@@ -476,6 +482,7 @@
   var typeSel = [];
   var minScore = 0;      // 최소 평점(카카오맵), 0 = 전체
   var noFerry = false;    // 배편으로만 가는 섬 제외
+  var likeOnly = false;   // 좋다고 확인된 4곳과 닮은 구성만
   var staySel = [];      // "숙박" / "캠핑" (대분류)
   var kindSel = [];      // 숙박 세부 구분 라벨("독채"…)
   // rooms[].4 의 시설 구분 코드 ↔ 라벨
@@ -485,6 +492,17 @@
   // 숙박 세부는 캠핑을 뺀 나머지 — 캠핑은 대분류에서 고른다
   var KIND_OPTIONS_ALL = ["독채", "동형", "기타"];
   var favorites = {};    // 지점ID -> true (관심 휴양림)
+  // 처음 쓰는 사람에게 시드로 넣어 주는 관심 휴양림. 브라우저마다 따로 저장되는
+  // 목록이라 기기를 옮기면 비어 있는데, 그때 맨손으로 시작하지 않게 한다.
+  // 한 번 심고 나면 사용자 목록이 진실 — 해제해도 다시 넣지 않는다(SEED_VERSION).
+  var DEFAULT_FAVS = [
+    "ID02030012",   // 영인산 (충남 아산)
+    "ID02030120",   // 갯골 (강원 인제)
+    "ID02030095",   // 광치 (강원 양구)
+    "ID02030129"    // 수락산 동막골 (서울 노원)
+  ];
+  var STORE_SEED = "foresttrip-calendar.seed";
+  var SEED_VERSION = "2026-08-1";
   var favOnly = false;   // 관심 휴양림만 보기
 
   function has(list, v) { return list.length === 0 || list.indexOf(v) !== -1; }
@@ -502,7 +520,7 @@
   function currentState() {
     return {
       region: regionSel, type: typeSel, stay: staySel, kind: kindSel, text: filterText,
-      score: minScore, noFerry: noFerry,
+      score: minScore, noFerry: noFerry, like: likeOnly,
       cmin: minPeople, cmax: maxPeople,
       pmin: minPrice, pmax: maxPrice, favOnly: favOnly
     };
@@ -516,6 +534,7 @@
     staySel = [].concat(s.stay || []).filter(Boolean);
     minScore = s.score || 0;
     noFerry = !!s.noFerry;
+    likeOnly = !!s.like;
     kindSel = [].concat(s.kind || []).filter(Boolean);
     filterText = s.text || "";
     minPeople = s.cmin || 0; maxPeople = s.cmax || 0;
@@ -532,11 +551,20 @@
   }
 
   function loadFavorites() {
+    var seeded = false;
     try {
       (JSON.parse(localStorage.getItem(STORE_FAVS)) || []).forEach(function (id) {
         favorites[id] = true;
       });
+      seeded = localStorage.getItem(STORE_SEED) === SEED_VERSION;
     } catch (e) { /* 저장값이 깨졌으면 빈 목록으로 시작 */ }
+    if (seeded) return;
+    // 아직 심지 않았으면 기본 목록을 더한다(기존 ★ 는 그대로 둔다)
+    DEFAULT_FAVS.forEach(function (id) { favorites[id] = true; });
+    try {
+      localStorage.setItem(STORE_SEED, SEED_VERSION);
+      localStorage.setItem(STORE_FAVS, JSON.stringify(Object.keys(favorites)));
+    } catch (e) { /* 저장 불가여도 이번 세션에는 적용된다 */ }
   }
 
   function loadFilters() {
@@ -557,6 +585,7 @@
     put("k", kindSel.join(","));
     put("score", minScore || "");
     if (noFerry) q.push("noferry=1");
+    if (likeOnly) q.push("like=1");
     put("q", filterText);
     put("cmin", minPeople || "");
     put("cmax", maxPeople || "");
@@ -576,13 +605,13 @@
       var i = pair.indexOf("=");
       if (i > 0) p[pair.slice(0, i)] = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " "));
     });
-    var known = ["r", "t", "s", "k", "score", "noferry", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
+    var known = ["r", "t", "s", "k", "score", "noferry", "like", "q", "cmin", "cmax", "pmin", "pmax", "fav", "favonly"];
     if (!known.some(function (k) { return k in p; })) return false;
     var list = function (v) { return v ? v.split(",").filter(Boolean) : []; };
     var num = function (v) { var n = parseFloat(v); return n > 0 ? n : 0; };
     applyState({
       region: list(p.r), type: list(p.t), stay: list(p.s), kind: list(p.k), text: p.q || "",
-      score: num(p.score), noFerry: p.noferry === "1",
+      score: num(p.score), noFerry: p.noferry === "1", like: p.like === "1",
       cmin: num(p.cmin), cmax: num(p.cmax),
       pmin: num(p.pmin) * 10000, pmax: num(p.pmax) * 10000,
       favOnly: p.favonly === "1"
@@ -599,6 +628,36 @@
     $("cmax").value = maxPeople || "";
     $("pmin").value = minPrice ? minPrice / 10000 : "";
     $("pmax").value = maxPrice ? maxPrice / 10000 : "";
+  }
+
+  // ── "닮은 곳" 판별 ────────────────────────────────────────
+  // 좋다고 확인된 네 곳(영인산·갯골·광치·수락산 동막골)의 공통점에서 뽑은 기준.
+  // 전국 분포와 비교해 실제로 변별력이 있는 것만 남겼다:
+  //   · 넷 다 공립
+  //   · 숙박 객실의 독채 비중 64~100% (전국 중간 51%)
+  //   · 보정 평점 4.11~4.46 (상위권)
+  // 정원(4~6)·면적(32~41㎡)·객실 수(18~32)는 전국 중간값과 차이가 없어 제외했다.
+  // 네 곳에서 끌어낸 상관이지 "좋은 이유" 는 아니다 — 후보를 좁히는 용도로 본다.
+  var LIKE_MIN_DETACH = 0.64;
+  var LIKE_MIN_SCORE = 4.1;
+  var LIKE_TYPE = "공립";
+
+  function likeGood(insttId, forestName) {
+    var p = PROFILES[insttId], rt = RATINGS[insttId];
+    if (!p || !p[0] || !rt) return null;          // 판별할 자료가 없음
+    if (operatorType(forestName || "") !== LIKE_TYPE) return false;
+    var ratio = p[1] / p[0];
+    if (ratio < LIKE_MIN_DETACH) return false;
+    if (rt[2] < LIKE_MIN_SCORE) return false;
+    return { detach: ratio, score: rt[2] };
+  }
+
+  function likeBadge(insttId, forestName) {
+    var r = likeGood(insttId, forestName);
+    if (!r) return "";
+    return '<em class="like" title="공립 · 독채 ' + Math.round(r.detach * 100) +
+      "% · 보정 평점 " + r.score.toFixed(2) + ' — 좋다고 확인된 네 곳과 닮은 구성">' +
+      "닮음</em>";
   }
 
   // ── 예약 난이도 ───────────────────────────────────────────
@@ -728,6 +787,7 @@
       if (!f) continue;
       if (favOnly && !favorites[f[1]]) continue;
       if (noFerry && FERRY_ONLY[f[1]]) continue;
+      if (likeOnly && !likeGood(f[1], f[0])) continue;
       if (minScore > 0) {
         var rt = RATINGS[f[1]];
         // 평점을 모르는 곳(사립은 수집 대상이 아니다)은 판정할 수 없어 제외한다.
@@ -836,6 +896,7 @@
       var f = forestOfPolicy && forestOfPolicy.get(p);
       if (favOnly && !(f && favorites[f[1]])) return false;
       if (noFerry && f && FERRY_ONLY[f[1]]) return false;
+      if (likeOnly && !(f && likeGood(f[1], f[0]))) return false;
       if (minScore > 0) {
         var rt = f && RATINGS[f[1]];
         if (!rt || (rt[2] || rt[0]) < minScore) return false;
@@ -925,7 +986,9 @@
     }).join("") +
       '<label><input type="radio" name="scoresel" value="0"' +
       (minScore ? "" : " checked") + "> 전체</label>" +
-      '<hr><label><input type="checkbox" id="noferry"' + (noFerry ? " checked" : "") +
+      '<hr><label><input type="checkbox" id="likeonly"' + (likeOnly ? " checked" : "") +
+      "> 닮은 곳만 (좋다고 확인된 4곳과 유사)</label>" +
+      '<label><input type="checkbox" id="noferry"' + (noFerry ? " checked" : "") +
       "> 배편 필요 제외</label>" +
       '<p class="multi-note">카카오맵 평점(국립·공립). 리뷰가 적은 곳은 ' +
       "점수를 그대로 믿지 않고 평균 쪽으로 보정해 비교합니다.</p>";
@@ -933,6 +996,7 @@
     var sum = $("scorebox").querySelector("summary");
     var parts = [];
     if (minScore) parts.push("★" + minScore.toFixed(1) + "+");
+    if (likeOnly) parts.push("닮은 곳");
     if (noFerry) parts.push("배편 제외");
     sum.textContent = parts.length ? parts.join(" · ") : "전체 평점";
     sum.classList.toggle("on", parts.length > 0);
@@ -1047,7 +1111,7 @@
               .filter(Boolean).join(" · ")) +
             (FERRY_ONLY[r.id] ? ' · <em title="' + esc(FERRY_ONLY[r.id]) + '">🚢 배편</em>' : "") +
             (r.open ? ' · <span class="fl-days">빈자리 ' + r.days + "/" + r.total + "일</span>" : "") +
-            "</span>" + scarcityBadge(r.id) + "</div>";
+            "</span>" + likeBadge(r.id, r.name) + scarcityBadge(r.id) + "</div>";
         }).join("");
   }
 
@@ -1170,10 +1234,26 @@
   var GWANGJU = "광주시 광산구".split(" ");
   var SOLO = { "강원": "강원", "충북": "충북", "전북": "전북", "제주": "제주" };
 
+  // 광역시 자치구처럼 이름만으로 지역이 확정되는 곳을 먼저 모아 둔다.
+  // 숲나들e 의 시·도 값이 어긋나는 경우가 있어서다(수락산 동막골은 서울
+  // 노원구인데 "강원" 으로 온다). 여러 광역시에 같은 이름이 있는 "중구" 같은
+  // 자치구는 확정할 수 없으니 제외한다.
+  var GU_TO_WIDE = (function () {
+    var map = {};
+    [["서울", SEOUL_GU], ["인천", INCHEON], ["대구", DAEGU], ["대전", DAEJEON],
+     ["부산", BUSAN], ["울산", ULSAN], ["광주", GWANGJU]].forEach(function (pair) {
+      pair[1].forEach(function (gu) {
+        map[gu] = (gu in map) ? null : pair[0];
+      });
+    });
+    return map;
+  })();
+
   function wideArea(region, sigungu) {
+    var s = String(sigungu || "");
+    if (GU_TO_WIDE[s]) return GU_TO_WIDE[s];
     var r = String(region || "").replace(/[\/\s]/g, "");
     if (SOLO[r]) return SOLO[r];
-    var s = String(sigungu || "");
     var has = function (list) { return list.indexOf(s) !== -1; };
     if (r === "서울인천경기") {
       return has(SEOUL_GU) ? "서울" : has(INCHEON) ? "인천" : "경기";
@@ -1250,7 +1330,7 @@
             esc(bareName(p.label || p.name)) + "</a>" +
             '<em class="otag">' + esc(where) + "</em>" +
             (st ? '<em class="otag score">' + esc(st) + "</em>" : "") +
-            (f && f[1] ? scarcityBadge(f[1]) : "") + lot + "</span>" +
+            (f ? likeBadge(f[1], f[0]) + scarcityBadge(f[1]) : "") + lot + "</span>" +
             "<span>" + esc(p.rule) + "</span></div>";
         }).join("") +
         '<p class="open-note">휴양림이 공고한 정기 오픈일입니다. 대부분 선착순 ' +
@@ -1297,7 +1377,7 @@
         '<a class="fname" href="' + forestUrl(e.id, e.name) + '" target="_blank" rel="noopener"' +
         ' title="숲나들e 휴양림 페이지 열기 (예약은 그 화면에서)">' + esc(e.name) + "</a>" +
         (scoreTag(e.id) ? '<span class="score">' + esc(scoreTag(e.id)) + "</span>" : "") +
-        scarcityBadge(e.id) +
+        likeBadge(e.id, e.name) + scarcityBadge(e.id) +
         '<span class="region">' + esc(areaLabel(e.region, sigungu(e.name))) + "</span>" + maps + "</h3>" +
         ruleLine + rooms + "</div>";
     }).join("");
@@ -1308,7 +1388,7 @@
   }
 
   function rerender() {
-    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || staySel.length || minScore || noFerry || minPeople || maxPeople ||
+    $("reset").hidden = !(regionSel.length || typeSel.length || kindSel.length || staySel.length || minScore || noFerry || likeOnly || minPeople || maxPeople ||
       minPrice || maxPrice || filterText || favOnly);
     renderFilterMenus();
     renderFavToggle();
@@ -1368,6 +1448,7 @@
   $("scoreopts").addEventListener("change", function (ev) {
     if (ev.target.name === "scoresel") minScore = parseFloat(ev.target.value) || 0;
     if (ev.target.id === "noferry") noFerry = ev.target.checked;
+    if (ev.target.id === "likeonly") likeOnly = ev.target.checked;
     rerender();
   });
   bindMulti("kindbox", "kindopts",
@@ -1470,7 +1551,7 @@
     $("cmin").value = ""; $("cmax").value = "";
     $("pmin").value = ""; $("pmax").value = ""; $("filter").value = "";
     regionSel = []; typeSel = []; kindSel = []; staySel = [];
-    minScore = 0; noFerry = false;
+    minScore = 0; noFerry = false; likeOnly = false;
     minPeople = 0; maxPeople = 0; minPrice = 0; maxPrice = 0; filterText = "";
     favOnly = false;   // 관심 목록 자체는 남긴다 — 보기 조건만 되돌린다
     rerender();
@@ -1536,6 +1617,7 @@
       LOTTERY = {};
       (DATA.lottery_ids || []).forEach(function (id) { LOTTERY[id] = true; });
       RATINGS = DATA.ratings || {};
+      PROFILES = DATA.profiles || {};
       ROOMS = DATA.rooms || [];
       CATEGORIES = DATA.categories || [];
       var from = DATA.range.from, to = DATA.range.to;

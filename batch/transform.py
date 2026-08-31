@@ -113,6 +113,7 @@ def transform(
     directory: list | None = None,
     lottery: dict | None = None,
     ratings: dict | None = None,
+    profiles: dict | None = None,
 ) -> dict:
     categories: list[str] = []
     cat_idx: dict[str, int] = {}
@@ -183,6 +184,13 @@ def transform(
         # 리뷰가 1~3건인 곳이 5.0 이나 1.0 으로 튀어 순위가 뒤집히므로, 표본이
         # 적을수록 전체 평균으로 끌어당기는 보정값을 함께 싣고 필터는 그걸 쓴다.
         "ratings": weighted_ratings(ratings),
+        # 지점별 객실 구성 {지점ID: [숙박 객실수, 독채수, 정원중간, 면적중간, 캠핑수]}
+        # 만실 지점도 포함된다(fetch_profiles.py 가 예약 가능 여부와 무관하게 수집).
+        "profiles": {
+            fid: [pr.get("stay", 0), pr.get("detach", 0), pr.get("cap", 0),
+                  pr.get("area", 0), pr.get("camp", 0)]
+            for fid, pr in ((profiles or {}).get("profiles") or {}).items()
+        },
         "categories": categories,
         "forests": forests,
         "rooms": rooms,
@@ -202,10 +210,10 @@ def load_optional(path: str | None):
 
 
 def main() -> int:
-    if len(sys.argv) not in (3, 4, 5, 6, 7):
+    if len(sys.argv) not in (3, 4, 5, 6, 7, 8):
         print(
-            "usage: transform.py <raw.json> <vacancy.json> "
-            "[policy.json] [directory.json] [lottery.json] [ratings.json]",
+            "usage: transform.py <raw.json> <vacancy.json> [policy.json] "
+            "[directory.json] [lottery.json] [ratings.json] [profiles.json]",
             file=sys.stderr,
         )
         return 2
@@ -215,7 +223,8 @@ def main() -> int:
     directory = load_optional(sys.argv[4] if len(sys.argv) > 4 else None)
     lottery = load_optional(sys.argv[5] if len(sys.argv) > 5 else None)
     ratings = load_optional(sys.argv[6] if len(sys.argv) > 6 else None)
-    out = transform(raw, policies, directory, lottery, ratings)
+    profiles = load_optional(sys.argv[7] if len(sys.argv) > 7 else None)
+    out = transform(raw, policies, directory, lottery, ratings, profiles)
     with open(sys.argv[2], "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
